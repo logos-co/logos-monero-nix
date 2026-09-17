@@ -1,0 +1,12 @@
+{
+  global:
+    MONEROD_start;
+    MONEROD_stop;
+    MONEROD_state;
+    MONEROD_status_json;
+    MONEROD_last_error;
+    MONEROD_free;
+    MONEROD_version;
+  local:
+    *;
+};

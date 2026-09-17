@@ -1,0 +1,7 @@
+_MONEROD_start
+_MONEROD_stop
+_MONEROD_state
+_MONEROD_status_json
+_MONEROD_last_error
+_MONEROD_free
+_MONEROD_version

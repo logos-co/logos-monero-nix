@@ -1,0 +1,39 @@
+From bfe1d9961cfadf291a70dcc856da1ec864668e8f Mon Sep 17 00:00:00 2001
+From: logos <b@l.invalid>
+Date: Thu, 17 Sep 2026 19:14:27 -0300
+Subject: [PATCH] daemon: make stop_p2p() public so an embedder can signal a
+ clean shutdown
+
+t_daemon::stop() resets mp_internals, so calling it while run() is still on another
+thread destroys objects run() is using. stop_p2p() only signals -- run() then unwinds
+and returns on its own -- but it was private, leaving an embedded daemon with no
+correct way to stop short of raising SIGINT at the entire process.
+---
+ src/daemon/daemon.h | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/daemon/daemon.h b/src/daemon/daemon.h
+index 529b42d..fec4833 100644
+--- a/src/daemon/daemon.h
++++ b/src/daemon/daemon.h
+@@ -39,7 +39,16 @@ struct t_internals;
+ class t_daemon final {
+ public:
+   static void init_options(boost::program_options::options_description & option_spec);
+-private:
++
++  // Signal the daemon to shut down, WITHOUT tearing it down. run() returns shortly
++  // afterwards and does its own orderly teardown; the caller then destroys this
++  // object, whose destructor releases the internals.
++  //
++  // An embedder that runs run() on its own thread has no other correct way to stop:
++  // stop() resets mp_internals while run() is still using them, which crashes, and
++  // the only other route upstream offers is raising SIGINT at the whole process --
++  // hostile inside a host that has its own signal handling. Public rather than a new
++  // method so the diff against upstream stays one access specifier.
+   void stop_p2p();
+ private:
+   std::unique_ptr<t_internals> mp_internals;
+-- 
+2.50.1 (Apple Git-155)
+
