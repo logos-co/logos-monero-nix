@@ -221,6 +221,17 @@ pkgs.stdenvNoCC.mkDerivation {
     # needs them beside the tree. Staged here so exactly one derivation owns the pin.
     mkdir -p "$out/.logos"
     cp -R ${monero_c}/monero_libwallet2_api_c "$out/.logos/wallet2_shim"
+    # monero_c's shim sources reach the tree by RELATIVE path --
+    # monero_wallet2_api_c.cpp opens ../../../../monero/src/wallet/api/wallet2_api.h,
+    # which only resolves in monero_c's own layout (the shim dir sitting next to a
+    # `monero` dir). Recreating that shape with one relative symlink is far less
+    # fragile than patching ~100 KB of generated-looking shim source, and it keeps
+    # those files exactly as the monero_c pin ships them.
+    ln -s .. "$out/.logos/monero"
+    # monero_c is LGPL-3.0 over BSD-3 Monero, and every library built from this tree
+    # has to ship both notices. Staged here so one derivation owns the pin and the
+    # licence text together.
+    install -m0644 ${monero_c}/LICENSE "$out/.logos/LICENSE.monero_c"
     runHook postInstall
   '';
 

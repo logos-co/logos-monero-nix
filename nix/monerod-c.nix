@@ -63,6 +63,7 @@ stdenv.mkDerivation {
     # logos-module-builder's `include` staging looks when it copies runtime files
     # beside a plugin.
     install -m0644 ${moneroSrc}/LICENSE "$out/lib/LICENSE.monero"
+    install -m0644 ${moneroSrc}/.logos/LICENSE.monero_c "$out/lib/LICENSE.monero_c"
   '';
 
   meta = {

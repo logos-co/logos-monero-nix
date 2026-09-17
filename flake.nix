@@ -35,6 +35,10 @@
             inherit pkgs moneroSrc;
             shimSrc = ./shim;
           };
+          monero-c = import ./nix/monero-c.nix {
+            inherit pkgs moneroSrc;
+            shimSrc = ./shim-wallet2;
+          };
         });
     };
 }
