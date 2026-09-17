@@ -50,6 +50,13 @@ stdenv.mkDerivation {
 
   # Build ONLY our target: this is what keeps simplewallet (and the tests, and the
   # blockchain utilities) out of the build entirely.
+  # __FILE__ is what drags the whole 59 MB source tree into this library's RUNTIME
+  # closure, and from there into every consumer and the .lgx payload: easylogging++
+  # logs __FILE__, so the compiled TUs embed 123 absolute store paths and nix records
+  # a reference for each. Rewriting the prefix drops the reference and makes the log
+  # lines read /monero/src/... instead of a store hash, which is also easier to read.
+  env.NIX_CFLAGS_COMPILE = "-ffile-prefix-map=${moneroSrc}=/monero";
+
   ninjaFlags = [ "monerod_c" ];
   buildFlags = [ "monerod_c" ];
 
