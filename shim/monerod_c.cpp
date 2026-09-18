@@ -29,9 +29,10 @@
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "logos.monerod"
 
-// Declared, not included: on Windows <openssl/ssl.h> drags in wincrypt.h, whose
-// X509_NAME/OCSP_REQUEST macros break OpenSSL's own headers.
-extern "C" int OPENSSL_init_ssl(uint64_t opts, const void *settings);
+// Declared with OpenSSL's exact parameter type, so it is a compatible redeclaration when
+// the real header also arrives transitively; including it directly breaks on Windows.
+struct ossl_init_settings_st;
+extern "C" int OPENSSL_init_ssl(uint64_t opts, const ossl_init_settings_st* settings);
 
 namespace po = boost::program_options;
 namespace bf = boost::filesystem;
