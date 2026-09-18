@@ -1,22 +1,5 @@
-# Monero's own contrib/depends, built hermetically, for the Windows target only.
-#
-# WHY, measured at P2: the nixpkgs mingw package set does not build. boost 1.86 dies in
-# Boost.Process's Jamfile ("Unable to find file or target named
-# .../libs/process/build//advapi32"); zeromq 4.3.5 and libevent both fail with
-# _WIN32_WINNT-family errors under mingw/UCRT + GCC 15 -- zeromq's windows.hpp gets
-# "operator '>=' has no left operand", libevent errors inside mingw's OWN iphlpapi.h.
-# Adding -D_WIN32_WINNT cleared zeromq's first error straight into a second (it builds
-# the Unix IPC transport on Windows and wants sys/socket.h). None of these three has
-# ever been cross-built in this workspace, and ZMQ is mandatory in Monero's CMake, so
-# it cannot simply be dropped.
-#
-# contrib/depends is how Monero officially ships Windows and how monero_c builds the
-# prebuilt we are replacing, with upstream's own mingw patches for each package. It
-# needs NO fixed-output derivation: every source is sha256-pinned in-tree, so nix
-# fetches each by its committed hash, pre-seeds sources/, and depends runs offline.
-#
-# Used for x86_64-windows ONLY. The four native targets keep using nixpkgs, where they
-# are already green.
+# Monero's contrib/depends, for x86_64-windows only: nixpkgs' mingw set does not build.
+# Sources are hash-pinned in-tree, so this runs offline with no fixed-output derivation.
 { pkgs, moneroSrc }:
 
 let
@@ -99,23 +82,11 @@ buildPkgs.stdenv.mkDerivation {
     mkdir -p "$SOURCES_PATH"
     ${seed}
 
-    # The source tree is read-only in the store and depends writes into it -- but copy
-    # with modes INTACT and relax them afterwards. `--no-preserve=mode` also strips the
-    # executable bit from config.guess/config.sub, and the failure is one the error
-    # message does not name: `$(shell ./config.guess)` silently yields nothing, so
-    # host_os is empty and make stops on "No rule to make target 'hosts/.mk'".
+    # Keep modes: --no-preserve=mode strips +x from config.guess, emptying host_os.
     cp -R contrib/depends "$TMPDIR/depends"
     chmod -R u+w "$TMPDIR/depends"
 
-    # OpenSSL's ./Configure is a Perl script with a `#!/usr/bin/env perl` shebang, and
-    # /usr/bin/env does not exist inside the nix sandbox:
-    #   sh: ./Configure: /usr/bin/env: bad interpreter: No such file or directory
-    # Invoking the interpreter directly sidesteps the shebang entirely. Of the seven
-    # packages we build, openssl is the only one that runs a script this way -- the
-    # rest are autotools, whose configure is #!/bin/sh, which the sandbox does have.
-    #
-    # This is also a failure that CANNOT reproduce on the dev Mac, where the sandbox is
-    # off and /usr/bin/env resolves fine. Linux is the only place it shows up.
+    # openssl's Configure is `#!/usr/bin/env perl`, and the sandbox has no /usr/bin/env.
     _mk="$TMPDIR/depends/packages/openssl.mk"
     grep -q '^  \./Configure ' "$_mk" || {
       echo "ERROR: openssl.mk no longer matches the ./Configure line this rewrites." >&2
@@ -124,52 +95,10 @@ buildPkgs.stdenv.mkDerivation {
     }
     sed -i 's|^  \./Configure |  perl ./Configure |' "$_mk"
 
-    # Overriding the package lists on the command line, which `make` lets us do:
-    #   - icu4c: monero_c's patch 0018 reduced mingw's ICU_LIBRARIES to just `iconv`,
-    #     so the CMake no longer links ICU and building it would be pure cost.
-    #   - hidapi / protobuf / libusb: hardware-wallet support, which we build with
-    #     -DUSE_DEVICE_TREZOR=OFF. A node and a wallet2 ABI need none of it.
-    # `packages` is ONE explicit list, and sodium is in it even though packages.mk puts
-    # sodium under mingw32_packages. GNU make semantics: a variable set on the command
-    # line overrides every makefile assignment to it INCLUDING `+=`, so the Makefile's
-    # `packages += $(<host_os>_packages)` silently becomes a no-op the moment we
-    # override `packages`. Setting mingw32_packages alongside it therefore did nothing,
-    # and sodium was never built -- which surfaced much later, and only in the
-    # consumer, as `SODIUM_LIBRARY ... set to NOTFOUND` from a CMake configure.
-    # mingw32_native_packages is different and still works: nothing overrides
-    # `native_packages`, so its `+=` still runs and appends our empty value.
-    #
-    # NO -j, deliberately. depends passes MAKEFLAGS down to each package's own make, and
-    # OpenSSL's build then invokes `ar` concurrently on one archive. The result was a
-    # genuinely corrupt libcrypto.a: `ar t` listed zero members and `nm` stopped with
-    # "malformed archive" right after libcrypto-lib-ct_log.obj, which the consumer only
-    # discovered at its final link ("error adding symbols: malformed archive").
-    # Serialising the dependency build costs wall-clock once and is cached thereafter;
-    # a corrupt archive costs a full debugging cycle every time.
-    #
-    # GITIAN=1 drops native_ccache, which is useless in a nix build.
-    #
-    # mingw32_CFLAGS carries -std=gnu17 because depends pins packages from 2017-2019
-    # and nixpkgs' mingw GCC is 15.2, where the C default moved to gnu23. libiconv 1.15
-    # declares mbrtowc with an empty parameter list, which gnu23 reads as "no
-    # parameters": "conflicting types for 'mbrtowc'; have 'size_t(void)'". CXXFLAGS is
-    # overridden separately and WITHOUT the flag -- hosts/mingw32.mk defines
-    # mingw32_CXXFLAGS=$(mingw32_CFLAGS), so overriding only CFLAGS would hand a C
-    # standard to g++ for boost and zeromq.
-    #
-    # _WIN32_WINNT is required by this toolchain rather than by the packages: its
-    # mcfgthread headers carry "#warning Please define _WIN32_WINNT", which zeromq's
-    # -Werror turns into an error. 0x0A00 is Windows 10, matching logos-nix's
-    # deliberate choice of UCRT over the legacy MSVCRT ("what Microsoft ships on
-    # Windows 10+"). The same undefined macro is what broke nixpkgs' own mingw zeromq,
-    # so this is a property of the cross toolchain, not of either package set.
-    #
-    # It goes in CPPFLAGS, not CFLAGS/CXXFLAGS, for a reason learned the slow way:
-    # zeromq.mk sets `$(package)_cxxflags=-std=c++11`, which REPLACES the host default
-    # rather than appending to it, so a define put in mingw32_CXXFLAGS reached every C
-    # compile (1063 of them) and no C++ one. The failure then looked identical to
-    # having set no flag at all. CPPFLAGS applies to both languages, none of the seven
-    # packages overrides `_cppflags`, and a preprocessor define belongs there anyway.
+    # One explicit list: a command-line var also disables the Makefile's `+=` to it.
+    # Dropped: icu4c (patch 0018), hidapi/protobuf/libusb (no Trezor), ccache (GITIAN).
+    # gnu17 for 2017-era C on GCC 15; _WIN32_WINNT in CPPFLAGS, since zeromq's cxxflags
+    # replace the host's. No -j: parallel `ar` corrupted libcrypto.a.
     make -C "$TMPDIR/depends" \
       HOST=x86_64-w64-mingw32 \
       GITIAN=1 \
@@ -187,13 +116,7 @@ buildPkgs.stdenv.mkDerivation {
     mkdir -p "$out"
     cp -R "$TMPDIR/depends/x86_64-w64-mingw32/." "$out/"
 
-    # depends bakes its BUILD-TIME prefix into everything it generates -- the toolchain
-    # file lands with
-    #   SET(BOOST_ROOT /build/depends/x86_64-w64-mingw32)
-    #   SET(ZMQ_LIB    /build/depends/x86_64-w64-mingw32/lib/libzmq.a)
-    # and the .pc/.la/.cmake files do the same. None of those paths exists once the
-    # build directory is gone, so a consumer would fail to find boost, zmq or unbound
-    # with nothing to suggest why. Rewrite them to this output.
+    # depends bakes its build prefix into toolchain.cmake and .pc/.la files; rewrite it.
     _old="$TMPDIR/depends/x86_64-w64-mingw32"
     _hits=$(grep -rl "$_old" "$out" 2>/dev/null || true)
     if [ -z "$_hits" ]; then

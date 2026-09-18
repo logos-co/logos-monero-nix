@@ -1,23 +1,11 @@
-# libmonerod_c: the Monero daemon as a shared library with a C ABI.
-#
-# Built from the same patched tree as the wallet2 library (nix/monero-src.nix), which
-# is what makes this cheap -- the daemon links static archives that tree already has to
-# produce, so there is no second Monero build.
+# libmonerod_c: Monero's daemon as a shared library with a C ABI.
 { pkgs, moneroSrc, shimSrc, depends ? null }:
 
 let
   inherit (pkgs) lib;
 
-  # x86_64-windows takes a different route entirely: Monero's own contrib/depends
-  # prefix supplies boost, openssl, zeromq, unbound, expat, libiconv and sodium, plus
-  # a toolchain.cmake that points CMake at them. nixpkgs' mingw set does not build --
-  # see nix/monero-depends.nix for what fails and why -- and depends is how Monero
-  # officially ships Windows.
-  #
-  # That makes the Windows build a NATIVE derivation that happens to emit PE objects:
-  # it runs on the build platform with the cross toolchain among its inputs, exactly
-  # as the depends build itself does. So the stdenv, cmake and pkg-config all come
-  # from buildPackages, and none of the nixpkgs dependency set is used.
+  # Windows builds natively-on-linux against Monero's contrib/depends prefix, since
+  # nixpkgs' mingw set does not build (see nix/monero-depends.nix).
   isWin = pkgs.pkgs.stdenv.hostPlatform.isWindows;
   bp = pkgs.buildPackages;
   stdenv' = if isWin then bp.stdenv else pkgs.stdenv;
@@ -58,37 +46,17 @@ stdenv'.mkDerivation {
     "-DSTACK_TRACE=OFF"
     "-Wno-dev"
   ] ++ lib.optionals isWin [
-    # Supplies CMAKE_SYSTEM_NAME, the cross compilers, CMAKE_FIND_ROOT_PATH and
-    # BOOST_ROOT/ZMQ_LIB/UNBOUND_LIBRARIES pointing at depends' static prefix.
-    # It also sets STATIC ON, which is what gives Windows one self-contained DLL
-    # instead of a payload full of nix-built dependency DLLs.
+    # Cross compilers, find-root and static dependency paths; STATIC ON gives one DLL.
     "-DCMAKE_TOOLCHAIN_FILE=${depends}/share/toolchain.cmake"
-    # nixpkgs' cmake setup hook injects -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-    # (plus AR/RANLIB/STRIP from the gcc wrapper) taken from THIS derivation's stdenv,
-    # which on the Windows branch is the native one. Those -D cache entries beat the
-    # toolchain file's own SET(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc), so the build
-    # configured with the NATIVE compiler and would have emitted ELF, not PE. The only
-    # visible symptom was `find_library(SODIUM_LIBRARY sodium)` coming back NOTFOUND
-    # against a prefix that demonstrably contains libsodium.a.
-    #
-    # Our cmakeFlags are appended after the hook's, so restating the cross tools here
-    # wins. Checking that the toolchain SETS a compiler was not enough -- what matters
-    # is what survives on the final command line.
+    # nixpkgs' cmake hook injects the native gcc; restating the cross tools last wins.
     "-DCMAKE_C_COMPILER=${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}gcc"
     "-DCMAKE_CXX_COMPILER=${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}g++"
     "-DCMAKE_AR=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}ar"
     "-DCMAKE_RANLIB=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}ranlib"
     "-DCMAKE_STRIP=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}strip"
     "-DCMAKE_RC_COMPILER=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}windres"
-    # depends' toolchain hard-sets ZMQ_LIB, UNBOUND_LIBRARIES, Readline_LIBRARY and
-    # friends rather than letting find_library look for them -- and sodium is simply
-    # missing from that list. It cannot be found by search, either: the toolchain sets
-    # CMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY, so find_library re-roots its search
-    # prefixes, and CMAKE_SYSTEM_PREFIX_PATH here is `<cmake store path>;/usr/local`.
-    # Rooted, that yields <prefix>/usr/local/lib and <prefix>/<cmake-path>/lib and
-    # never <prefix>/lib -- measured with a standalone find_library probe against this
-    # very toolchain file. So point at it directly, exactly as the toolchain does for
-    # the others.
+    # depends hard-sets zmq/unbound but not sodium, and FIND_ROOT_PATH_MODE=ONLY makes
+    # <prefix>/lib unreachable by search.
     "-DSODIUM_LIBRARY=${depends}/lib/libsodium.a"
     "-DSODIUM_INCLUDE_PATH=${depends}/include"
     "-DLOGOS_DEPENDS_LIB=${depends}/lib"
@@ -104,10 +72,7 @@ stdenv'.mkDerivation {
   dontStrip = true;
 
   postInstall = ''
-    # Monero is BSD-3-Clause and monero_c's patches are LGPL-3.0, so the licence text
-    # has to travel with the library. lib/ rather than share/: that is the only place
-    # logos-module-builder's `include` staging looks when it copies runtime files
-    # beside a plugin.
+    # BSD-3 and LGPL-3.0 notices; lib/ is where module staging looks.
     install -m0644 ${moneroSrc}/LICENSE "$out/lib/LICENSE.monero"
     install -m0644 ${moneroSrc}/.logos/LICENSE.monero_c "$out/lib/LICENSE.monero_c"
   '';

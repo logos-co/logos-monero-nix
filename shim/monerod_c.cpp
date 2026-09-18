@@ -29,19 +29,8 @@
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "logos.monerod"
 
-// DECLARED, not #included. <openssl/ssl.h> on Windows pulls in wincrypt.h, whose
-// X509_NAME / OCSP_REQUEST / PKCS7_SIGNER_INFO macros collide with OpenSSL's own type
-// names, producing a cascade of nonsense inside OpenSSL's own headers:
-//   openssl/x509v3.h: 'nm' was not declared in this scope
-//   openssl/x509v3.h: expected ')' before numeric constant
-//   openssl/safestack.h: expected primary-expression
-// Monero's own sources never hit it, because none of them includes openssl/ssl.h in
-// this position -- the collision is one this shim introduced. WIN32_LEAN_AND_MEAN does
-// not help: it is wincrypt, not winsock, that collides here.
-//
-// OPENSSL_init_ssl is stable public ABI from OpenSSL 1.1.0 on and is the only symbol
-// this file needs, so declaring it beats teaching five targets' include order about
-// wincrypt.
+// Declared, not included: on Windows <openssl/ssl.h> drags in wincrypt.h, whose
+// X509_NAME/OCSP_REQUEST macros break OpenSSL's own headers.
 extern "C" int OPENSSL_init_ssl(uint64_t opts, const void *settings);
 
 namespace po = boost::program_options;
@@ -49,25 +38,8 @@ namespace bf = boost::filesystem;
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// What this shim deliberately does NOT do, all of which src/daemon/main.cpp does.
-// Each one is a behaviour that only makes sense for a standalone process:
-//
-//   * daemonizer::init_options / daemonizer::daemonize — fork, --detach, pidfile.
-//     We ARE the process the caller wants; forking would orphan the node from the
-//     module that is supposed to own its lifetime.
-//   * tools::signal_handler::install — would steal SIGINT/SIGTERM from the module
-//     host, whose own shutdown path is how MONEROD_stop() gets called in the first
-//     place. Installing a handler here is how an in-process node hijacks its host.
-//   * config-file parsing (--config-file) — the module owns configuration and
-//     persists it itself; two sources of truth for the same settings is a bug.
-//   * arg_command positional handling — that is the `monerod status` CLI, which
-//     talks to a daemon over RPC rather than being one.
-//   * parse_public_rpc_port / --public-node — a public node advertises itself to the
-//     network. Nothing here should do that on a user's machine without being asked,
-//     so public_rpc_port is hard-wired to 0.
-//   * STACK_TRACE — not built.
-// ---------------------------------------------------------------------------
+// Unlike main.cpp there is no daemonize/fork, no signal handler, no config file
+// and no public-node advertising: the module owns the process and the config.
 
 std::mutex g_mutex;                              // serialises start/stop
 std::atomic<int> g_state{MONEROD_STOPPED};
@@ -80,30 +52,15 @@ std::string g_rpc_url;                           // guarded by g_mutex
 std::chrono::steady_clock::time_point g_started;
 std::unique_ptr<daemonize::t_daemon> g_daemon;   // guarded by g_mutex
 
-// easylogging++ installs process-global state, so configuring it twice in one process
-// is at best wasted work and at worst a surprise for whoever configured it first.
+// easylogging++ is process-global: configure it once.
 bool g_log_configured = false;
 
-// The process-wide setup monerod does in main() via tools::on_startup(), minus the one
-// part of it a LIBRARY must not do.
-//
-// Skipping this is not theoretical: without OPENSSL_init_ssl the RPC server binds,
-// accepts the TCP connection and then never answers -- monerod defaults to
-// --rpc-ssl=autodetect, so epee sniffs every incoming connection for TLS, and with
-// OpenSSL uninitialised that sniff stalls. curl reports "Connected" and hangs, and
-// nothing is logged because monerod's default categories put net.ssl at FATAL.
-// Measured against the upstream monerod binary with identical flags, which answers
-// get_info immediately.
-//
-// tools::on_startup() is NOT called, because it also calls setup_crash_dump(), which
-// on POSIX installs SIGSEGV and SIGBUS handlers that _exit(1). In a module host that
-// would replace the host's own crash handling and kill it without its teardown ever
-// running -- the same reason this shim installs no SIGINT/SIGTERM handler.
+// tools::on_startup() minus setup_crash_dump(), whose SIGSEGV handler would kill the
+// host. The OpenSSL init matters: rpc-ssl=autodetect stalls every request without it.
 void library_startup_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    // boost::filesystem throws on "invalid" locales such as en_US.UTF-8, and this
-    // shim calls bf::absolute() below, so it has to come first.
+    // boost::filesystem throws on some locales; must precede bf::absolute().
     tools::sanitize_locale();
     epee::string_tools::set_module_name_and_folder("monerod");
     OPENSSL_init_ssl(0, nullptr);
@@ -122,8 +79,7 @@ void set_error(const std::string& msg) {
   if (!msg.empty()) MERROR(msg);
 }
 
-// A deliberately small JSON string escaper. Pulling nlohmann in here would mean
-// another include path in five cross builds for what is six characters of escaping.
+// Small escaper rather than pulling nlohmann into five cross builds.
 std::string json_escape(const std::string& in) {
   std::string out;
   out.reserve(in.size() + 8);
@@ -147,10 +103,8 @@ std::string json_escape(const std::string& in) {
   return out;
 }
 
-// Minimal JSON-array-of-strings parser for argv_json. The module hands us a flag list
-// it built itself, so this does not need to be a general JSON parser -- but it DOES
-// need to reject anything it does not fully understand rather than silently dropping a
-// flag, because a dropped --stagenet means a node that syncs mainnet by surprise.
+// Rejects anything it does not fully parse: a silently dropped --stagenet would
+// sync mainnet.
 bool parse_argv_json(const std::string& in, std::vector<std::string>& out, std::string& err) {
   size_t i = 0;
   auto skip_ws = [&] { while (i < in.size() && (in[i]==' '||in[i]=='\t'||in[i]=='\n'||in[i]=='\r')) ++i; };
@@ -218,9 +172,8 @@ int MONEROD_start(const char* argv_json) {
   g_argv_json = argv_json ? argv_json : "[]";
 
   try {
-    // The option set monerod itself registers, minus the process-only groups listed
-    // at the top of this file. t_executor::init_options is what pulls in core, p2p
-    // and rpc -- everything t_daemon reads out of the variables_map.
+    // monerod's own option set minus the process-only groups; t_executor pulls in
+    // core, p2p and rpc.
     po::options_description core_settings("Settings");
     command_line::add_arg(core_settings, daemon_args::arg_log_file);
     command_line::add_arg(core_settings, daemon_args::arg_log_level);
@@ -266,10 +219,7 @@ int MONEROD_start(const char* argv_json) {
     if (!g_log_configured) {
       bf::path log_file_path{command_line::get_arg(vm, daemon_args::arg_log_file)};
       if (!log_file_path.has_parent_path()) log_file_path = data_dir / log_file_path;
-      // console=FALSE, deliberately. A module host relays its child's stdout/stderr,
-      // and monerod at log-level 0 still narrates startup -- interleaving that into
-      // the host's own stream is noise at best. The log file is what the daemon
-      // module's logTail() reads and what the UI shows.
+      // File only: the host relays our stdout, and logTail() reads the file.
       mlog_configure(log_file_path.string(), false,
                      command_line::get_arg(vm, daemon_args::arg_max_log_file_size),
                      command_line::get_arg(vm, daemon_args::arg_max_log_files));
@@ -284,7 +234,7 @@ int MONEROD_start(const char* argv_json) {
     MGINFO("Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL
                       << ") in-process on " << g_network);
 
-    // public_rpc_port = 0: never advertise as a public node. See the note above.
+    // public_rpc_port = 0: never advertise as a public node.
     g_daemon = std::make_unique<daemonize::t_daemon>(vm, 0);
   } catch (const std::exception& e) {
     set_error(std::string("daemon init failed: ") + e.what());
@@ -313,9 +263,7 @@ int MONEROD_start(const char* argv_json) {
       g_state.store(MONEROD_FAILED);
       return;
     }
-    // run() returning false is a startup failure -- a bound port, an unreadable
-    // database -- and it must not read as a clean stop, or the UI shows "stopped"
-    // for a node that never came up and the user has nothing to act on.
+    // false from run() is a failed start (port in use, bad DB), not a clean stop.
     if (!ok) {
       std::lock_guard<std::mutex> lock(g_mutex);
       if (g_state.load() != MONEROD_STOPPING)
@@ -336,21 +284,13 @@ void MONEROD_stop(void) {
     const int st = g_state.load();
     if (st == MONEROD_RUNNING || st == MONEROD_STARTING) {
       g_state.store(MONEROD_STOPPING);
-      // stop_p2p(), NOT stop(). t_daemon::stop() ends with
-      // `mp_internals.reset(nullptr)`, which destroys the core, p2p and rpc objects
-      // that run() is still using on the daemon thread -- a reliable SIGSEGV, and
-      // the node log shows exactly why: "Stopping/Deinitializing core RPC server"
-      // appearing on the CALLER's thread while the daemon thread is independently
-      // unwinding the same objects. stop_p2p() only signals; p2p.run() returns,
-      // run() does its own orderly teardown, and the destructor below -- after the
-      // join -- releases the internals on one thread. Upstream does all of this on
-      // one thread, which is why it never needed the distinction.
+      // stop_p2p(), not stop(): stop() frees mp_internals while run() still uses
+      // them. Signal here; the thread tears down and the destructor runs after the join.
       if (g_daemon) g_daemon->stop_p2p();
     }
     to_join = std::move(g_thread);
   }
-  // Joined OUTSIDE the lock: the daemon thread takes g_mutex on its way out, so
-  // holding it here would deadlock the very thread we are waiting for.
+  // Outside the lock: the daemon thread takes g_mutex on its way out.
   if (to_join.joinable()) to_join.join();
   {
     std::lock_guard<std::mutex> lock(g_mutex);

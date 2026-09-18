@@ -1,14 +1,5 @@
-# The one Monero source tree this repo builds everything from: monero-project/monero
-# at the revision monero_c pins, with monero_c's 21 patches replayed on top and every
-# submodule materialised from a hash-pinned fetch.
-#
-# Why patched rather than vanilla: logos-monero-wallet-core-module is written against
-# monero_c's 354-symbol C ABI, and 145 of those exports only exist because of these
-# patches (polyseed, coin control, UR, trezor). The patch set is wallet-side -- nothing
-# touches cryptonote_core, blockchain_db, hardforks, ringct, crypto, p2p,
-# cryptonote_protocol, rpc or daemon -- so a node built from this tree validates blocks
-# with code byte-identical to vanilla Monero. Measured, not assumed: the only
-# consensus-file change is `#define POLYSEED_COIN` in src/cryptonote_config.h.
+# One Monero tree for both libraries: monero at monero_c's pin, monero_c's patches replayed,
+# submodules pinned below. The patch set is wallet-side, and the build asserts it.
 { pkgs }:
 
 let
@@ -30,21 +21,13 @@ let
     hash = "sha256-A7EqamADbTyK6l26foSXfZLH94OUUMsgi7jdsKRubXU=";
   };
 
-  # GitHub STRIPS .gitmodules from archive tarballs, and patch 0001 modifies it --
-  # so without this the very first patch dies with "sha1 information is lacking or
-  # useless (.gitmodules)". Restored verbatim: `git hash-object` on this file is
-  # 721cce3b4bb9723425cbed31cec26c3d37477556, byte-identical to the patch's pre-image.
+  # GitHub strips .gitmodules from tarballs, and patch 0001 edits it.
   gitmodules = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/monero-project/monero/${moneroRev}/.gitmodules";
     hash = "sha256-dls/88qNfuE5kJZvBbcvDG/RB/Lo+U6dL4yGOd/NNh4=";
   };
 
-  # Submodule CONTENT, by path. A GitHub archive tarball omits submodule directories
-  # entirely, so every one of these has to be supplied here.
-  #
-  # The gitlink SHAs the patches carry are inert: we never run `git submodule update`,
-  # so only this table decides what gets compiled. That is what lets us honour the
-  # patch series unmodified while still choosing upstream RandomX -- see `randomx`.
+  # Submodule content by path; tarballs omit it. The patches' gitlink SHAs are inert.
   submodules = {
     "external/miniupnp" = fetch {
       owner = "miniupnp"; repo = "miniupnp";
@@ -67,16 +50,8 @@ let
       hash = "sha256-26UmESotSWnQ21VbAYEappLpkEMyl0jiuCaezRYd/sE=";
     };
 
-    # UPSTREAM RandomX 1.2.1 -- Monero's own pin -- deliberately NOT monero_c's
-    # MrCyjaneK/RandomX@5dfeeb30. Patch 0001 ("fix missing ___clear_cache when
-    # targetting iOS") repoints this submodule and does nothing else. That fork is 2
-    # commits ahead and, in src/jit_compiler_a64.cpp, replaces PRECISE i-cache flush
-    # ranges with whole-buffer ones in BOTH preprocessor branches -- including the
-    # HAVE_BUILTIN_CLEAR_CACHE path every non-Apple target takes. In
-    # generateSuperscalarHash the replacement range (code .. code+CodeSize) is not even
-    # a superset of the original (code+CodeSize .. code+codePos). On aarch64 that is
-    # stale-i-cache territory, and this library is the proof-of-work verifier in a
-    # validating node. We do not target iOS, so there is no upside to the fork.
+    # Upstream RandomX, not monero_c's iOS fork: the fork mangles i-cache flush ranges in
+    # the PoW verifier, and patch 0001 exists only to repoint this.
     "external/randomx" = fetch {
       owner = "tevador"; repo = "RandomX";
       rev = "102f8acf90a7649ada410de5499a7ec62e49e1da";
@@ -101,10 +76,7 @@ let
     };
   };
 
-  # The gitlink SHAs monero records at moneroRev. `git am` applies patch 0001's
-  # `-Subproject commit 102f8acf / +Subproject commit 5dfeeb30` hunk against the INDEX,
-  # and an archive tarball has no gitlink entries at all -- so without seeding these the
-  # very first patch fails. Seeding them is what lets the series stay unmodified.
+  # Seeded so patch 0001's gitlink hunk has a base; tarballs carry no gitlinks.
   baseGitlinks = {
     "external/miniupnp" = "544e6fcc73c5ad9af48a8985c94f0f1d742ef2e0";
     "external/rapidjson" = "129d19ba7f496df5e33658527a7158c79b99c21c";
@@ -140,10 +112,7 @@ pkgs.stdenvNoCC.mkDerivation {
   patchPhase = ''
     runHook prePatch
 
-    # A throwaway repo purely so `git am -3` can do its 3-way merge. The series was
-    # authored against ${moneroRev} and applies to nothing else (upstream's own
-    # apply_patches.sh uses `git am -3 --whitespace=fix`), so a plain `patch -p1` would
-    # be trading exact upstream semantics for fuzz.
+    # A scratch repo so the series replays with upstream's own `git am -3`.
     cp --no-preserve=mode,ownership ${gitmodules} .gitmodules
 
     git init -q .
@@ -151,10 +120,7 @@ pkgs.stdenvNoCC.mkDerivation {
     git config user.name "logos-monero-nix"
     git add -A
 
-    # AFTER `git add -A`, never before: every external/* submodule directory in the
-    # tarball is EMPTY, and `add -A` reconciles the index against the worktree, which
-    # deletes any gitlink entry seeded earlier. Patch 0001 then fails with
-    # "CONFLICT (modify/delete): external/randomx deleted in HEAD".
+    # After `git add -A`, which would drop gitlinks whose directories are empty.
     ${seedGitlinks}
 
     git commit -q -m "monero ${moneroRev}"
@@ -164,20 +130,11 @@ pkgs.stdenvNoCC.mkDerivation {
     git am -3 --whitespace=fix ${monero_c}/patches/monero/*.patch
     _after_upstream=$(git rev-parse HEAD)
 
-    # Our own patches, on top and kept separate so the upstream series stays a
-    # verbatim replay. Currently one: t_daemon::stop_p2p() has to be reachable for
-    # an embedder, because stop() resets mp_internals while run() is still using
-    # them. See patches/monero/ for the reasoning.
+    # Ours, kept separate so the upstream series stays verbatim.
     echo "applying logos patches..."
     git am -3 --whitespace=fix ${../patches/monero}/*.patch
 
-    # The whole "one tree serves both the wallet and a validating node" argument rests
-    # on this being empty, and a future monero_c bump could quietly break it. Verified
-    # empty at v0.18.4.6-RC2. Consensus, networking and RPC code must stay vanilla.
-    #
-    # Scoped to the UPSTREAM series only: our own patches are held to the allowlist
-    # below instead, because this guard would otherwise refuse them -- and it did,
-    # which is how we know it works.
+    # Consensus, networking and RPC must stay vanilla; our own patches get an allowlist.
     echo "asserting monero_c's series left consensus code alone..."
     _watched="src/cryptonote_core src/blockchain_db src/hardforks src/ringct src/crypto src/p2p src/cryptonote_protocol src/rpc src/daemon"
     _touched=$(git diff --name-only "$_base" "$_after_upstream" -- $_watched)
@@ -221,16 +178,9 @@ pkgs.stdenvNoCC.mkDerivation {
     # needs them beside the tree. Staged here so exactly one derivation owns the pin.
     mkdir -p "$out/.logos"
     cp -R ${monero_c}/monero_libwallet2_api_c "$out/.logos/wallet2_shim"
-    # monero_c's shim sources reach the tree by RELATIVE path --
-    # monero_wallet2_api_c.cpp opens ../../../../monero/src/wallet/api/wallet2_api.h,
-    # which only resolves in monero_c's own layout (the shim dir sitting next to a
-    # `monero` dir). Recreating that shape with one relative symlink is far less
-    # fragile than patching ~100 KB of generated-looking shim source, and it keeps
-    # those files exactly as the monero_c pin ships them.
+    # monero_c's shim includes the tree by relative path; recreate its layout.
     ln -s .. "$out/.logos/monero"
-    # monero_c is LGPL-3.0 over BSD-3 Monero, and every library built from this tree
-    # has to ship both notices. Staged here so one derivation owns the pin and the
-    # licence text together.
+    # LGPL-3.0 notice for every library built from this tree.
     install -m0644 ${monero_c}/LICENSE "$out/.logos/LICENSE.monero_c"
     runHook postInstall
   '';
@@ -239,9 +189,7 @@ pkgs.stdenvNoCC.mkDerivation {
 
   meta = {
     description = "monero-project/monero at ${builtins.substring 0 12 moneroRev}, with monero_c's patch series applied";
-    # Monero is BSD-3-Clause; monero_c's patches and shim are LGPL-3.0, so the
-    # patched tree as a whole is LGPL-3.0 and every library built from it ships as a
-    # separate, replaceable shared object with its licence text alongside.
+    # BSD-3 Monero, LGPL-3.0 monero_c patches and shim.
     license = [ pkgs.lib.licenses.bsd3 pkgs.lib.licenses.lgpl3Only ];
   };
 }

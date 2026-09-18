@@ -1,15 +1,5 @@
-# Builds monero_c's wallet2 C ABI from our patched tree, replacing the prebuilt
-# release-bundle.zip that logos-monero-wallet-core-module used to fetch.
-#
-# The SOURCES are monero_c's, staged in the tree at .logos/wallet2_shim by
-# nix/monero-src.nix -- deliberately not copied into this repo, so the monero_c pin
-# owns them and a version bump cannot leave a stale duplicate behind. This file is a
-# nix-native replacement for monero_c's own CMakeLists, whose MONERO_DIR /
-# EXTERNAL_LIBS_DIR expect a contrib/depends layout we do not use.
-#
-# The contract is the 354-symbol export list. Anything that changes it breaks
-# logos-monero-wallet-core-module, so the derivation diffs the built library's exports
-# against the .exp and against the prebuilt.
+# monero_c's wallet2 C ABI built from our tree; replaces the prebuilt release bundle.
+# The contract is its 354-symbol export list.
 cmake_minimum_required(VERSION 3.16)
 project(monero_wallet2_api_c CXX C)
 
@@ -24,26 +14,13 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# GLOBALLY, and before add_subdirectory -- exactly where monero_c puts it, and the
-# distinction matters. Setting hidden visibility as a TARGET property instead (which is
-# what libmonerod_c first did) leaves Monero's static archives at default visibility
-# while our own TUs go hidden; libc++ compares std::type_info by address, and the two
-# copies of one typeinfo then make dynamic_cast throw std::bad_cast at runtime. Applied
-# to the whole tree there is one consistent copy and RTTI is fine -- which is why the
-# prebuilt this replaces was built this way and works.
+# Globally and before add_subdirectory, as monero_c does: one consistent visibility
+# keeps typeinfo unique, so dynamic_cast works.
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 
-# Keep absolute build paths out of the objects, and do it HERE rather than through
-# nix's NIX_CFLAGS_COMPILE. On the Windows target this derivation runs in a native
-# stdenv with the mingw compiler merely among its inputs, so NIX_CFLAGS_COMPILE would
-# be read by the BUILD compiler and never reach the cross one -- the flag would
-# silently not apply, and the only symptom would be a 59 MB source tree reappearing in
-# the runtime closure. Setting it in CMake covers every target identically.
-#
-# Two mappings, because there are two absolute roots: MONERO_SRC (easylogging++ logs
-# __FILE__, which embedded 123 store paths) and this shim directory (whose nix build
-# path carries a random id, so two builds of identical inputs differed byte-for-byte).
+# Strip absolute source/build paths from __FILE__. Set here, not via NIX_CFLAGS_COMPILE,
+# which never reaches the cross compiler on the Windows branch.
 set(_logos_prefix_map "-ffile-prefix-map=${MONERO_SRC}=/monero -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=/shim")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_logos_prefix_map}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_logos_prefix_map}")
@@ -70,9 +47,7 @@ target_include_directories(monero_wallet2_api_c PRIVATE
   "${CMAKE_BINARY_DIR}/monero_build/translations"
 )
 
-# wallet_api links its dependencies PUBLIC, so this pulls wallet, cryptonote_core,
-# mnemonics, lmdb, boost (incl. locale) and ICU along with it. bc-ur arrives the same
-# way, via src/wallet.
+# wallet_api links its deps PUBLIC (wallet, core, boost, ICU, bc-ur).
 target_link_libraries(monero_wallet2_api_c PRIVATE
   wallet_api
   ${wallet_api_LIB_DEPENDS}
@@ -80,44 +55,26 @@ target_link_libraries(monero_wallet2_api_c PRIVATE
 
 if(APPLE)
   set(EXP "${SHIM}/monero_libwallet2_api_c.exp")
-  # Via CMAKE_SHARED_LINKER_FLAGS, which is where monero_c puts it. A
-  # target_link_options("-Wl,-exported_symbols_list,...") did NOT reach the link line
-  # here, and the failure mode is quiet: the library still links and still exports all
-  # 354 required symbols, just with 11 extras riding along (JH hash constants,
-  # MONERO_RELEASE_NAME, and MONERO_PendingTransaction_txKey -- which monero_c's own
-  # .exp omits, so the prebuilt does not export it either). Only the symbol diff
-  # caught it.
+  # Via CMAKE_SHARED_LINKER_FLAGS, as monero_c does; target_link_options never reached
+  # the link line.
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -exported_symbols_list ${EXP}")
   set_target_properties(monero_wallet2_api_c PROPERTIES LINK_DEPENDS "${EXP}")
 else()
-  # monero_c uses --exclude-libs,ALL here rather than a version script. Keep that:
-  # the export surface has to match the prebuilt symbol for symbol, and the .exp is
-  # Mach-O-only, so ELF relies on hidden visibility plus this.
+  # ELF has no .exp: hidden visibility plus --exclude-libs, as monero_c does.
   target_link_options(monero_wallet2_api_c PRIVATE "-Wl,--exclude-libs,ALL")
 endif()
 
 if(MINGW)
-  # Monero appends -DWIN32_LEAN_AND_MEAN to CMAKE_CXX_FLAGS (CMakeLists.txt:788,903),
-  # but that happens inside its own add_subdirectory scope, so OUR TUs never see it --
-  # and they reach boost::asio too, via daemon/rpc.h -> rpc/core_rpc_server.h for the
-  # daemon and wallet2_api.h -> wallet2 -> epee for the wallet. Without it, windows.h
-  # drags in winsock.h first and asio stops with
-  #   socket_types.hpp:24: #error WinSock.h has already been included
-  # which is an include-ORDER complaint, not a broken boost.
+  # Monero sets WIN32_LEAN_AND_MEAN only in its own scope; without it winsock.h arrives
+  # before asio's winsock2.h.
   target_compile_definitions(monero_wallet2_api_c PRIVATE WIN32_LEAN_AND_MEAN)
 
-  # monero_c's patch 0018 reduces mingw's ICU_LIBRARIES to a bare `iconv`, so the final
-  # link asks for -liconv and needs somewhere to find depends' libiconv.a. The
-  # toolchain's CMAKE_FIND_ROOT_PATH governs find_*(), not the link line.
+  # Patch 0018 makes mingw's ICU_LIBRARIES a bare `iconv`, so the link needs this dir.
   if(LOGOS_DEPENDS_LIB)
     target_link_directories(monero_wallet2_api_c PRIVATE "${LOGOS_DEPENDS_LIB}")
   endif()
 
-  # Matching monero_c's own mingw link options, so the DLL we produce has the same
-  # shape as the prebuilt it replaces. Static libgcc/libstdc++ keeps two more DLLs out
-  # of the import table -- nix-bundle-lgx's windowsHostLibs does claim libstdc++-*.dll
-  # and libgcc_s_*.dll, so this is not strictly required, but the prebuilt imports
-  # neither and matching it is one less thing for the payload gate to argue about.
+  # Same mingw link options as monero_c, so the DLL has the prebuilt's shape.
   target_link_options(monero_wallet2_api_c PRIVATE -static-libgcc -static-libstdc++)
   target_link_options(monero_wallet2_api_c PRIVATE "-Wl,--section-alignment,16384")
 endif()
