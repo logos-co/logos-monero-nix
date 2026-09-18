@@ -65,13 +65,6 @@ stdenv'.mkDerivation {
     "-DCMAKE_TOOLCHAIN_FILE=${depends}/share/toolchain.cmake"
   ] ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin "-DBoost_USE_MULTITHREADED=OFF";
 
-  # __FILE__ is what drags the whole 59 MB source tree into this library's RUNTIME
-  # closure, and from there into every consumer and the .lgx payload: easylogging++
-  # logs __FILE__, so the compiled TUs embed 123 absolute store paths and nix records
-  # a reference for each. Rewriting the prefix drops the reference and makes the log
-  # lines read /monero/src/... instead of a store hash, which is also easier to read.
-  env.NIX_CFLAGS_COMPILE = "-ffile-prefix-map=${moneroSrc}=/monero";
-
   ninjaFlags = [ "monero_wallet2_api_c" ];
   buildFlags = [ "monero_wallet2_api_c" ];
 

@@ -22,6 +22,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # every object in the closure has to be position-independent.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Keep absolute build paths out of the objects, and do it HERE rather than through
+# nix's NIX_CFLAGS_COMPILE. On the Windows target this derivation runs in a native
+# stdenv with the mingw compiler merely among its inputs, so NIX_CFLAGS_COMPILE would
+# be read by the BUILD compiler and never reach the cross one -- the flag would
+# silently not apply, and the only symptom would be a 59 MB source tree reappearing in
+# the runtime closure. Setting it in CMake covers every target identically.
+#
+# Two mappings, because there are two absolute roots: MONERO_SRC (easylogging++ logs
+# __FILE__, which embedded 123 store paths) and this shim directory (whose nix build
+# path carries a random id, so two builds of identical inputs differed byte-for-byte).
+set(_logos_prefix_map "-ffile-prefix-map=${MONERO_SRC}=/monero -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=/shim")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_logos_prefix_map}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_logos_prefix_map}")
+
 add_subdirectory("${MONERO_SRC}" monero_build EXCLUDE_FROM_ALL)
 
 # src/daemon is an executable-only target upstream, so its sources are compiled here
@@ -107,6 +121,14 @@ if(APPLE)
     "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.exp")
   set_target_properties(monerod_c PROPERTIES
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.exp")
+elseif(MINGW)
+  # PE has no version script -- a DLL's export table comes from __declspec(dllexport),
+  # which monerod_c.h applies through MONEROD_API under MONEROD_C_BUILDING. Passing
+  # --version-script here would be an ELF mechanism aimed at a PE link. Marking any
+  # symbol dllexport also stops mingw's ld from falling back to auto-exporting
+  # everything, so the 7 are the whole export table; --exclude-libs keeps the static
+  # archives we swallow from re-exporting theirs.
+  target_link_options(monerod_c PRIVATE "-Wl,--exclude-libs,ALL")
 else()
   target_link_options(monerod_c PRIVATE
     "-Wl,--version-script,${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.map"

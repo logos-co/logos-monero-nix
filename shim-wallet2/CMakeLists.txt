@@ -34,6 +34,20 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 
+# Keep absolute build paths out of the objects, and do it HERE rather than through
+# nix's NIX_CFLAGS_COMPILE. On the Windows target this derivation runs in a native
+# stdenv with the mingw compiler merely among its inputs, so NIX_CFLAGS_COMPILE would
+# be read by the BUILD compiler and never reach the cross one -- the flag would
+# silently not apply, and the only symptom would be a 59 MB source tree reappearing in
+# the runtime closure. Setting it in CMake covers every target identically.
+#
+# Two mappings, because there are two absolute roots: MONERO_SRC (easylogging++ logs
+# __FILE__, which embedded 123 store paths) and this shim directory (whose nix build
+# path carries a random id, so two builds of identical inputs differed byte-for-byte).
+set(_logos_prefix_map "-ffile-prefix-map=${MONERO_SRC}=/monero -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=/shim")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_logos_prefix_map}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_logos_prefix_map}")
+
 add_subdirectory("${MONERO_SRC}" monero_build EXCLUDE_FROM_ALL)
 
 add_library(monero_wallet2_api_c SHARED

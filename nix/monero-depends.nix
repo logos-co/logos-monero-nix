@@ -107,6 +107,23 @@ buildPkgs.stdenv.mkDerivation {
     cp -R contrib/depends "$TMPDIR/depends"
     chmod -R u+w "$TMPDIR/depends"
 
+    # OpenSSL's ./Configure is a Perl script with a `#!/usr/bin/env perl` shebang, and
+    # /usr/bin/env does not exist inside the nix sandbox:
+    #   sh: ./Configure: /usr/bin/env: bad interpreter: No such file or directory
+    # Invoking the interpreter directly sidesteps the shebang entirely. Of the seven
+    # packages we build, openssl is the only one that runs a script this way -- the
+    # rest are autotools, whose configure is #!/bin/sh, which the sandbox does have.
+    #
+    # This is also a failure that CANNOT reproduce on the dev Mac, where the sandbox is
+    # off and /usr/bin/env resolves fine. Linux is the only place it shows up.
+    _mk="$TMPDIR/depends/packages/openssl.mk"
+    grep -q '^  \./Configure ' "$_mk" || {
+      echo "ERROR: openssl.mk no longer matches the ./Configure line this rewrites." >&2
+      echo "Re-check it rather than letting a silent no-op fail later at configure." >&2
+      exit 1
+    }
+    sed -i 's|^  \./Configure |  perl ./Configure |' "$_mk"
+
     # Overriding the package lists on the command line, which `make` lets us do:
     #   - icu4c: monero_c's patch 0018 reduced mingw's ICU_LIBRARIES to just `iconv`,
     #     so the CMake no longer links ICU and building it would be pure cost.
