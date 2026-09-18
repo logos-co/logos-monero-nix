@@ -98,8 +98,8 @@ buildPkgs.stdenv.mkDerivation {
     # One explicit list: a command-line var also disables the Makefile's `+=` to it.
     # Dropped: icu4c (patch 0018), hidapi/protobuf/libusb (no Trezor), ccache (GITIAN).
     # gnu17 for 2017-era C on GCC 15; _WIN32_WINNT in CPPFLAGS, since zeromq's cxxflags
-    # replace the host's. No -j: parallel `ar` corrupted libcrypto.a.
-    make -C "$TMPDIR/depends" \
+    # replace the host's.
+    make -C "$TMPDIR/depends" -j"$NIX_BUILD_CORES" \
       HOST=x86_64-w64-mingw32 \
       GITIAN=1 \
       SOURCES_PATH="$SOURCES_PATH" \
@@ -117,8 +117,10 @@ buildPkgs.stdenv.mkDerivation {
     cp -R "$TMPDIR/depends/x86_64-w64-mingw32/." "$out/"
 
     # depends bakes its build prefix into toolchain.cmake and .pc/.la files; rewrite it.
+    # Text files only: libcrypto.a embeds OPENSSLDIR, and sed there changes a member's
+    # length without its archive header ("malformed archive" at link).
     _old="$TMPDIR/depends/x86_64-w64-mingw32"
-    _hits=$(grep -rl "$_old" "$out" 2>/dev/null || true)
+    _hits=$(grep -rlI "$_old" "$out" 2>/dev/null || true)
     if [ -z "$_hits" ]; then
       echo "ERROR: no file references the build prefix, which cannot be right --" >&2
       echo "depends always bakes it in. The rewrite below would be a silent no-op." >&2
@@ -128,12 +130,16 @@ buildPkgs.stdenv.mkDerivation {
       [ -f "$f" ] || continue
       sed -i "s|$_old|$out|g" "$f" 2>/dev/null || true
     done
-    # Prove it: nothing may still point into the vanished build tree.
-    if grep -rl "$_old" "$out" 2>/dev/null | grep -q .; then
+    # Prove it: no text file may still point into the vanished build tree.
+    if grep -rlI "$_old" "$out" 2>/dev/null | grep -q .; then
       echo "ERROR: files still reference $_old after the rewrite:" >&2
-      grep -rl "$_old" "$out" 2>/dev/null | head -5 >&2
+      grep -rlI "$_old" "$out" 2>/dev/null | head -5 >&2
       exit 1
     fi
+    # And every archive must still parse.
+    for a in "$out"/lib/*.a; do
+      ${pkgs.stdenv.cc.targetPrefix}ar t "$a" > /dev/null || { echo "ERROR: $a is not a valid archive" >&2; exit 1; }
+    done
     # depends writes a CMake toolchain file naming its own prefix; the Monero build
     # consumes it instead of nixpkgs' cross plumbing.
     test -f "$out/share/toolchain.cmake" || {
