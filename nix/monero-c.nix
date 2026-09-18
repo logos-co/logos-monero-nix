@@ -9,28 +9,42 @@
 # a separate, replaceable shared object with its licence text alongside, and building
 # from source strengthens that position rather than weakening it -- we can hand over the
 # exact corresponding source and the recipe that produced this file.
-{ pkgs, moneroSrc, shimSrc }:
+{ pkgs, moneroSrc, shimSrc, depends ? null }:
 
 let
-  inherit (pkgs) lib stdenv;
+  inherit (pkgs) lib;
+
+  # x86_64-windows takes a different route entirely: Monero's own contrib/depends
+  # prefix supplies boost, openssl, zeromq, unbound, expat, libiconv and sodium, plus
+  # a toolchain.cmake that points CMake at them. nixpkgs' mingw set does not build --
+  # see nix/monero-depends.nix for what fails and why -- and depends is how Monero
+  # officially ships Windows.
+  #
+  # That makes the Windows build a NATIVE derivation that happens to emit PE objects:
+  # it runs on the build platform with the cross toolchain among its inputs, exactly
+  # as the depends build itself does. So the stdenv, cmake and pkg-config all come
+  # from buildPackages, and none of the nixpkgs dependency set is used.
+  isWin = pkgs.pkgs.stdenv.hostPlatform.isWindows;
+  bp = pkgs.buildPackages;
+  stdenv' = if isWin then bp.stdenv else pkgs.stdenv;
 in
-stdenv.mkDerivation {
+stdenv'.mkDerivation {
   pname = "monero_wallet2_api_c";
   version = moneroSrc.version;
 
   src = shimSrc;
 
-  nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
+  nativeBuildInputs =
+    (if isWin then [ bp.cmake bp.pkg-config pkgs.stdenv.cc pkgs.stdenv.cc.bintools ]
+              else [ pkgs.cmake pkgs.pkg-config ]);
 
-  buildInputs = [
+  buildInputs = lib.optionals (!isWin) [
     pkgs.boost186      # wallet_api wants Boost_LOCALE_LIBRARY as well as the usual set
     pkgs.icu           # boost::locale's backend, and wallet_api links ICU_LIBRARIES
     pkgs.libsodium
     pkgs.openssl
     pkgs.unbound
     pkgs.zeromq
-  ] ++ lib.optionals stdenv.hostPlatform.isWindows [
-    pkgs.windows.pthreads
   ];
 
   cmakeFlags = [
@@ -43,7 +57,13 @@ stdenv.mkDerivation {
     "-DBUILD_DOCUMENTATION=OFF"
     "-DSTACK_TRACE=OFF"
     "-Wno-dev"
-  ] ++ lib.optional stdenv.hostPlatform.isDarwin "-DBoost_USE_MULTITHREADED=OFF";
+  ] ++ lib.optionals isWin [
+    # Supplies CMAKE_SYSTEM_NAME, the cross compilers, CMAKE_FIND_ROOT_PATH and
+    # BOOST_ROOT/ZMQ_LIB/UNBOUND_LIBRARIES pointing at depends' static prefix.
+    # It also sets STATIC ON, which is what gives Windows one self-contained DLL
+    # instead of a payload full of nix-built dependency DLLs.
+    "-DCMAKE_TOOLCHAIN_FILE=${depends}/share/toolchain.cmake"
+  ] ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin "-DBoost_USE_MULTITHREADED=OFF";
 
   # __FILE__ is what drags the whole 59 MB source tree into this library's RUNTIME
   # closure, and from there into every consumer and the .lgx payload: easylogging++
@@ -67,7 +87,7 @@ stdenv.mkDerivation {
   # reported 19,153 spurious extras against a library whose link line demonstrably
   # carried -exported_symbols_list. cctools nm -gU is the tool that gives 354 for the
   # prebuilt this replaces, so it is the tool the comparison has to use.
-  doInstallCheck = stdenv.hostPlatform.isDarwin && !stdenv.hostPlatform.isWindows;
+  doInstallCheck = pkgs.stdenv.hostPlatform.isDarwin && !pkgs.stdenv.hostPlatform.isWindows;
   installCheckPhase = ''
     runHook preInstallCheck
     lib=$out/lib/libmonero_wallet2_api_c.dylib

@@ -115,6 +115,16 @@ else()
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.map")
 endif()
 
+if(MINGW)
+  # Matching monero_c's own mingw link options, so the DLL we produce has the same
+  # shape as the prebuilt it replaces. Static libgcc/libstdc++ keeps two more DLLs out
+  # of the import table -- nix-bundle-lgx's windowsHostLibs does claim libstdc++-*.dll
+  # and libgcc_s_*.dll, so this is not strictly required, but the prebuilt imports
+  # neither and matching it is one less thing for the payload gate to argue about.
+  target_link_options(monerod_c PRIVATE -static-libgcc -static-libstdc++)
+  target_link_options(monerod_c PRIVATE "-Wl,--section-alignment,16384")
+endif()
+
 install(TARGETS monerod_c
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin

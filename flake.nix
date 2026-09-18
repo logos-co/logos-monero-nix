@@ -27,16 +27,20 @@
     in
     {
       packages = forAllTargets (pkgs:
-        let moneroSrc = import ./nix/monero-src.nix { inherit pkgs; };
+        let
+          moneroSrc = import ./nix/monero-src.nix { inherit pkgs; };
+          depends = import ./nix/monero-depends.nix { inherit pkgs moneroSrc; };
         in {
           inherit moneroSrc;
           monero-src = moneroSrc;
           monerod-c = import ./nix/monerod-c.nix {
-            inherit pkgs moneroSrc;
+            inherit pkgs moneroSrc depends;
             shimSrc = ./shim;
           };
+          # Windows only -- see nix/monero-depends.nix for the measurements behind it.
+          monero-depends = depends;
           monero-c = import ./nix/monero-c.nix {
-            inherit pkgs moneroSrc;
+            inherit pkgs moneroSrc depends;
             shimSrc = ./shim-wallet2;
           };
         });
