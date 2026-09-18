@@ -45,6 +45,9 @@ stdenv'.mkDerivation {
     # libunwind has no mingw port, and a node does not need to dump stacks.
     "-DSTACK_TRACE=OFF"
     "-Wno-dev"
+  ] ++ lib.optionals (!isWin) [
+    # Static zmq: the portable bundler rewrote a dynamic libzmq to @rpath and never copied it.
+    "-DZMQ_LIB=${pkgs.zeromq}/lib/libzmq.a"
   ] ++ lib.optionals isWin [
     # Cross compilers, find-root and static dependency paths; STATIC ON gives one DLL.
     "-DCMAKE_TOOLCHAIN_FILE=${depends}/share/toolchain.cmake"
