@@ -69,6 +69,10 @@ else()
   # ELF has no .exp: hidden visibility plus --exclude-libs, as monero_c does.
   target_link_options(monero_wallet2_api_c PRIVATE "-Wl,--exclude-libs,ALL")
 endif()
+if(NOT APPLE AND NOT MINGW)
+  # As in the daemon shim: without it we are RWE and glibc >= 2.41 refuses to dlopen us.
+  target_link_options(monero_wallet2_api_c PRIVATE "-Wl,-z,noexecstack")
+endif()
 
 if(MINGW)
   # Monero sets WIN32_LEAN_AND_MEAN only in its own scope; without it winsock.h arrives

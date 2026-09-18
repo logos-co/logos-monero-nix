@@ -99,9 +99,12 @@ elseif(MINGW)
   # PE exports come from __declspec(dllexport), not a version script.
   target_link_options(monerod_c PRIVATE "-Wl,--exclude-libs,ALL")
 else()
+  # Monero sets -z noexecstack only in its own scope; without it an asm object with no
+  # .note.GNU-stack marks us RWE, and glibc >= 2.41 then refuses to dlopen us.
   target_link_options(monerod_c PRIVATE
     "-Wl,--version-script,${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.map"
-    "-Wl,--exclude-libs,ALL")
+    "-Wl,--exclude-libs,ALL"
+    "-Wl,-z,noexecstack")
   set_target_properties(monerod_c PROPERTIES
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.map")
 endif()
