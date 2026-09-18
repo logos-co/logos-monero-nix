@@ -93,3 +93,8 @@ install(FILES
   "${SHIM}/src/main/cpp/monero_wallet2_api_c.h"
   "${SHIM}/src/main/cpp/monero_checksum.h"
   DESTINATION include)
+
+# polyseed builds SHARED unless Monero's STATIC is on, and we link it by absolute path.
+install(DIRECTORY "${CMAKE_BINARY_DIR}/monero_build/external/polyseed/"
+        DESTINATION lib
+        FILES_MATCHING PATTERN "libpolyseed*")
