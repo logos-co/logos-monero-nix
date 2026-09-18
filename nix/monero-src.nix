@@ -192,7 +192,7 @@ pkgs.stdenvNoCC.mkDerivation {
 
     # Our own patches get an explicit allowlist rather than a free pass. Anything
     # else appearing here is a patch nobody reviewed against this rule.
-    _allowed="src/daemon/daemon.h"
+    _allowed="src/daemon/daemon.h src/daemon/daemon.cpp"
     _ours=$(git diff --name-only "$_after_upstream" HEAD)
     for _f in $_ours; do
       case " $_allowed " in

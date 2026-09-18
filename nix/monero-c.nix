@@ -63,6 +63,34 @@ stdenv'.mkDerivation {
     # It also sets STATIC ON, which is what gives Windows one self-contained DLL
     # instead of a payload full of nix-built dependency DLLs.
     "-DCMAKE_TOOLCHAIN_FILE=${depends}/share/toolchain.cmake"
+    # nixpkgs' cmake setup hook injects -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+    # (plus AR/RANLIB/STRIP from the gcc wrapper) taken from THIS derivation's stdenv,
+    # which on the Windows branch is the native one. Those -D cache entries beat the
+    # toolchain file's own SET(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc), so the build
+    # configured with the NATIVE compiler and would have emitted ELF, not PE. The only
+    # visible symptom was `find_library(SODIUM_LIBRARY sodium)` coming back NOTFOUND
+    # against a prefix that demonstrably contains libsodium.a.
+    #
+    # Our cmakeFlags are appended after the hook's, so restating the cross tools here
+    # wins. Checking that the toolchain SETS a compiler was not enough -- what matters
+    # is what survives on the final command line.
+    "-DCMAKE_C_COMPILER=${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}gcc"
+    "-DCMAKE_CXX_COMPILER=${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}g++"
+    "-DCMAKE_AR=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}ar"
+    "-DCMAKE_RANLIB=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}ranlib"
+    "-DCMAKE_STRIP=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}strip"
+    "-DCMAKE_RC_COMPILER=${pkgs.stdenv.cc.bintools.bintools}/bin/${pkgs.stdenv.cc.targetPrefix}windres"
+    # depends' toolchain hard-sets ZMQ_LIB, UNBOUND_LIBRARIES, Readline_LIBRARY and
+    # friends rather than letting find_library look for them -- and sodium is simply
+    # missing from that list. It cannot be found by search, either: the toolchain sets
+    # CMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY, so find_library re-roots its search
+    # prefixes, and CMAKE_SYSTEM_PREFIX_PATH here is `<cmake store path>;/usr/local`.
+    # Rooted, that yields <prefix>/usr/local/lib and <prefix>/<cmake-path>/lib and
+    # never <prefix>/lib -- measured with a standalone find_library probe against this
+    # very toolchain file. So point at it directly, exactly as the toolchain does for
+    # the others.
+    "-DSODIUM_LIBRARY=${depends}/lib/libsodium.a"
+    "-DSODIUM_INCLUDE_PATH=${depends}/include"
   ] ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin "-DBoost_USE_MULTITHREADED=OFF";
 
   ninjaFlags = [ "monero_wallet2_api_c" ];

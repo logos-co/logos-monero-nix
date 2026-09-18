@@ -1,0 +1,63 @@
+From 52f314557d0d5aec6e3db3998bf5183499e24f30 Mon Sep 17 00:00:00 2001
+From: logos <b@l.invalid>
+Date: Fri, 18 Sep 2026 01:03:25 -0300
+Subject: [PATCH] daemon: allow building without the interactive console
+
+MONERO_NO_INTERACTIVE_CONSOLE compiles out t_command_server, so an embedder that only
+ever calls run(false) need not build command_server.cpp, command_parser_executor.cpp or
+rpc_command_executor.cpp -- roughly 130 KB of source whose only purpose is the console.
+
+That is not merely tidiness under mingw: command_server.cpp pulls epee's http_client and
+thence boost::asio, which fails to compile there (socket_types.hpp, and OpenSSL's
+safestack.h/x509v3.h behind it). The console is unreachable through run(false) anyway.
+---
+ src/daemon/daemon.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/daemon/daemon.cpp b/src/daemon/daemon.cpp
+index 2512e54..12d59bf 100644
+--- a/src/daemon/daemon.cpp
++++ b/src/daemon/daemon.cpp
+@@ -44,7 +44,9 @@
+ #include "daemon/p2p.h"
+ #include "daemon/protocol.h"
+ #include "daemon/rpc.h"
++#ifndef MONERO_NO_INTERACTIVE_CONSOLE
+ #include "daemon/command_server.h"
++#endif
+ #include "daemon/command_line_args.h"
+ #include "net/net_ssl.h"
+ #include "version.h"
+@@ -196,6 +198,7 @@ bool t_daemon::run(bool interactive)
+     for(auto& rpc: mp_internals->rpcs)
+       rpc->run();
+ 
++#ifndef MONERO_NO_INTERACTIVE_CONSOLE
+     std::unique_ptr<daemonize::t_command_server> rpc_commands;
+     if (interactive && mp_internals->rpcs.size())
+     {
+@@ -203,6 +206,10 @@ bool t_daemon::run(bool interactive)
+       rpc_commands.reset(new daemonize::t_command_server(0, 0, boost::none, epee::net_utils::ssl_support_t::e_ssl_support_disabled, false, mp_internals->rpcs.front()->get_server()));
+       rpc_commands->start_handling(std::bind(&daemonize::t_daemon::stop_p2p, this));
+     }
++#else
++    if (interactive)
++      MWARNING("built without the interactive console; running non-interactively");
++#endif
+ 
+     if (mp_internals->zmq)
+       mp_internals->zmq->server.run();
+@@ -217,8 +224,10 @@ bool t_daemon::run(bool interactive)
+     
+     mp_internals->p2p.run(); // blocks until p2p goes down
+ 
++#ifndef MONERO_NO_INTERACTIVE_CONSOLE
+     if (rpc_commands)
+       rpc_commands->stop_handling();
++#endif
+ 
+     if (mp_internals->zmq)
+       mp_internals->zmq->server.stop();
+-- 
+2.50.1 (Apple Git-155)
+

@@ -39,20 +39,23 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_logos_prefix_map}")
 add_subdirectory("${MONERO_SRC}" monero_build EXCLUDE_FROM_ALL)
 
 # src/daemon is an executable-only target upstream, so its sources are compiled here
-# rather than linked. Everything EXCEPT main.cpp: main() is what this shim replaces.
-# The console TUs come along because daemon.cpp references t_command_server for its
-# interactive branch -- they are inert with USE_READLINE=OFF and run(false).
+# rather than linked. Everything EXCEPT main.cpp, which this shim replaces -- and
+# except the three console TUs, which our 0002 patch lets us compile out.
+#
+# Dropping them is not tidiness. command_server.cpp pulls epee's http_client and thence
+# boost::asio, which does not compile for mingw here: boost/asio/detail/socket_types.hpp
+# errors, and OpenSSL's safestack.h and x509v3.h ('nm' was not declared) behind it. The
+# console is unreachable through run(false) in any case, so ~130 KB of source that only
+# serves `monerod status` was the whole obstacle. On darwin and linux it compiled fine,
+# which is why this only showed up on the fifth target.
 set(MONERO_DAEMON_SOURCES
   "${MONERO_SRC}/src/daemon/daemon.cpp"
   "${MONERO_SRC}/src/daemon/executor.cpp"
-  "${MONERO_SRC}/src/daemon/command_server.cpp"
-  "${MONERO_SRC}/src/daemon/command_parser_executor.cpp"
-  "${MONERO_SRC}/src/daemon/rpc_command_executor.cpp"
 )
 
 add_library(monerod_c SHARED monerod_c.cpp ${MONERO_DAEMON_SOURCES})
 
-target_compile_definitions(monerod_c PRIVATE MONEROD_C_BUILDING)
+target_compile_definitions(monerod_c PRIVATE MONEROD_C_BUILDING MONERO_NO_INTERACTIVE_CONSOLE)
 
 target_include_directories(monerod_c PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"

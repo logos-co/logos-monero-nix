@@ -129,6 +129,16 @@ buildPkgs.stdenv.mkDerivation {
     #     so the CMake no longer links ICU and building it would be pure cost.
     #   - hidapi / protobuf / libusb: hardware-wallet support, which we build with
     #     -DUSE_DEVICE_TREZOR=OFF. A node and a wallet2 ABI need none of it.
+    # `packages` is ONE explicit list, and sodium is in it even though packages.mk puts
+    # sodium under mingw32_packages. GNU make semantics: a variable set on the command
+    # line overrides every makefile assignment to it INCLUDING `+=`, so the Makefile's
+    # `packages += $(<host_os>_packages)` silently becomes a no-op the moment we
+    # override `packages`. Setting mingw32_packages alongside it therefore did nothing,
+    # and sodium was never built -- which surfaced much later, and only in the
+    # consumer, as `SODIUM_LIBRARY ... set to NOTFOUND` from a CMake configure.
+    # mingw32_native_packages is different and still works: nothing overrides
+    # `native_packages`, so its `+=` still runs and appends our empty value.
+    #
     # GITIAN=1 drops native_ccache, which is useless in a nix build.
     #
     # mingw32_CFLAGS carries -std=gnu17 because depends pins packages from 2017-2019
@@ -156,11 +166,10 @@ buildPkgs.stdenv.mkDerivation {
       HOST=x86_64-w64-mingw32 \
       GITIAN=1 \
       SOURCES_PATH="$SOURCES_PATH" \
-      packages="boost openssl zeromq libiconv expat unbound" \
+      packages="boost openssl zeromq libiconv expat unbound sodium" \
       mingw32_CFLAGS="-pipe -std=gnu17" \
       mingw32_CXXFLAGS="-pipe" \
       mingw32_CPPFLAGS="-D_WIN32_WINNT=0x0A00" \
-      mingw32_packages="sodium" \
       mingw32_native_packages="" \
       -j"''${NIX_BUILD_CORES:-4}"
     runHook postBuild
