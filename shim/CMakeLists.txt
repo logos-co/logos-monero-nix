@@ -31,7 +31,8 @@ set(MONERO_DAEMON_SOURCES
 
 add_library(monerod_c SHARED monerod_c.cpp ${MONERO_DAEMON_SOURCES})
 
-target_compile_definitions(monerod_c PRIVATE MONEROD_C_BUILDING MONERO_NO_INTERACTIVE_CONSOLE)
+target_compile_definitions(monerod_c PRIVATE MONEROD_C_BUILDING MONERO_NO_INTERACTIVE_CONSOLE
+  MONERO_NO_SIGNAL_HANDLER)
 
 target_include_directories(monerod_c PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"

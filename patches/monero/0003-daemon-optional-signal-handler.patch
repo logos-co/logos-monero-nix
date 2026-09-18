@@ -1,0 +1,32 @@
+From b701c41d5887c1c33cfadf88e5dfa6aa73c33476 Mon Sep 17 00:00:00 2001
+From: logos <b@l.invalid>
+Date: Fri, 18 Sep 2026 08:13:03 -0300
+Subject: [PATCH] daemon: allow running without installing process signal
+ handlers
+
+tools::signal_handler::install replaces the process-wide SIGINT and SIGTERM handlers.
+An embedder whose host drives its own graceful shutdown from SIGTERM loses that path:
+the host's handler never runs, so neither does its teardown hook, and the signal only
+sets flags on run()'s stack (dangling once run() returns). MONERO_NO_SIGNAL_HANDLER
+skips the install; such an embedder stops the node through stop_p2p() instead.
+---
+ src/daemon/daemon.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/daemon/daemon.cpp b/src/daemon/daemon.cpp
+index 12d59bf..76cc34a 100644
+--- a/src/daemon/daemon.cpp
++++ b/src/daemon/daemon.cpp
+@@ -188,7 +188,9 @@ bool t_daemon::run(bool interactive)
+     stop = true;
+     stop_thread.join();
+   });
++#ifndef MONERO_NO_SIGNAL_HANDLER
+   tools::signal_handler::install([&stop, &shutdown](int){ stop = shutdown = true; });
++#endif
+ 
+   try
+   {
+-- 
+2.50.1 (Apple Git-155)
+
