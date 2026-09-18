@@ -25,6 +25,12 @@ set(_logos_prefix_map "-ffile-prefix-map=${MONERO_SRC}=/monero -ffile-prefix-map
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_logos_prefix_map}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_logos_prefix_map}")
 
+# Monero's STATIC (set by depends' toolchain on Windows) makes polyseed an archive, and its
+# header drops dllimport only under POLYSEED_STATIC, which monero_c's toolchain sets globally.
+if(STATIC)
+  add_compile_definitions(POLYSEED_STATIC)
+endif()
+
 add_subdirectory("${MONERO_SRC}" monero_build EXCLUDE_FROM_ALL)
 
 add_library(monero_wallet2_api_c SHARED
