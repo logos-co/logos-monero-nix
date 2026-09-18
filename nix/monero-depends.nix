@@ -138,6 +138,20 @@ buildPkgs.stdenv.mkDerivation {
     # overridden separately and WITHOUT the flag -- hosts/mingw32.mk defines
     # mingw32_CXXFLAGS=$(mingw32_CFLAGS), so overriding only CFLAGS would hand a C
     # standard to g++ for boost and zeromq.
+    #
+    # _WIN32_WINNT is required by this toolchain rather than by the packages: its
+    # mcfgthread headers carry "#warning Please define _WIN32_WINNT", which zeromq's
+    # -Werror turns into an error. 0x0A00 is Windows 10, matching logos-nix's
+    # deliberate choice of UCRT over the legacy MSVCRT ("what Microsoft ships on
+    # Windows 10+"). The same undefined macro is what broke nixpkgs' own mingw zeromq,
+    # so this is a property of the cross toolchain, not of either package set.
+    #
+    # It goes in CPPFLAGS, not CFLAGS/CXXFLAGS, for a reason learned the slow way:
+    # zeromq.mk sets `$(package)_cxxflags=-std=c++11`, which REPLACES the host default
+    # rather than appending to it, so a define put in mingw32_CXXFLAGS reached every C
+    # compile (1063 of them) and no C++ one. The failure then looked identical to
+    # having set no flag at all. CPPFLAGS applies to both languages, none of the seven
+    # packages overrides `_cppflags`, and a preprocessor define belongs there anyway.
     make -C "$TMPDIR/depends" \
       HOST=x86_64-w64-mingw32 \
       GITIAN=1 \
@@ -145,6 +159,7 @@ buildPkgs.stdenv.mkDerivation {
       packages="boost openssl zeromq libiconv expat unbound" \
       mingw32_CFLAGS="-pipe -std=gnu17" \
       mingw32_CXXFLAGS="-pipe" \
+      mingw32_CPPFLAGS="-D_WIN32_WINNT=0x0A00" \
       mingw32_packages="sodium" \
       mingw32_native_packages="" \
       -j"''${NIX_BUILD_CORES:-4}"
@@ -155,6 +170,31 @@ buildPkgs.stdenv.mkDerivation {
     runHook preInstall
     mkdir -p "$out"
     cp -R "$TMPDIR/depends/x86_64-w64-mingw32/." "$out/"
+
+    # depends bakes its BUILD-TIME prefix into everything it generates -- the toolchain
+    # file lands with
+    #   SET(BOOST_ROOT /build/depends/x86_64-w64-mingw32)
+    #   SET(ZMQ_LIB    /build/depends/x86_64-w64-mingw32/lib/libzmq.a)
+    # and the .pc/.la/.cmake files do the same. None of those paths exists once the
+    # build directory is gone, so a consumer would fail to find boost, zmq or unbound
+    # with nothing to suggest why. Rewrite them to this output.
+    _old="$TMPDIR/depends/x86_64-w64-mingw32"
+    _hits=$(grep -rl "$_old" "$out" 2>/dev/null || true)
+    if [ -z "$_hits" ]; then
+      echo "ERROR: no file references the build prefix, which cannot be right --" >&2
+      echo "depends always bakes it in. The rewrite below would be a silent no-op." >&2
+      exit 1
+    fi
+    echo "$_hits" | while read -r f; do
+      [ -f "$f" ] || continue
+      sed -i "s|$_old|$out|g" "$f" 2>/dev/null || true
+    done
+    # Prove it: nothing may still point into the vanished build tree.
+    if grep -rl "$_old" "$out" 2>/dev/null | grep -q .; then
+      echo "ERROR: files still reference $_old after the rewrite:" >&2
+      grep -rl "$_old" "$out" 2>/dev/null | head -5 >&2
+      exit 1
+    fi
     # depends writes a CMake toolchain file naming its own prefix; the Monero build
     # consumes it instead of nixpkgs' cross plumbing.
     test -f "$out/share/toolchain.cmake" || {
