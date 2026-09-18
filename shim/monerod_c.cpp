@@ -13,7 +13,6 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-#include <openssl/ssl.h>
 
 #include "common/command_line.h"
 #include "common/util.h"
@@ -29,6 +28,21 @@
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "logos.monerod"
+
+// DECLARED, not #included. <openssl/ssl.h> on Windows pulls in wincrypt.h, whose
+// X509_NAME / OCSP_REQUEST / PKCS7_SIGNER_INFO macros collide with OpenSSL's own type
+// names, producing a cascade of nonsense inside OpenSSL's own headers:
+//   openssl/x509v3.h: 'nm' was not declared in this scope
+//   openssl/x509v3.h: expected ')' before numeric constant
+//   openssl/safestack.h: expected primary-expression
+// Monero's own sources never hit it, because none of them includes openssl/ssl.h in
+// this position -- the collision is one this shim introduced. WIN32_LEAN_AND_MEAN does
+// not help: it is wincrypt, not winsock, that collides here.
+//
+// OPENSSL_init_ssl is stable public ABI from OpenSSL 1.1.0 on and is the only symbol
+// this file needs, so declaring it beats teaching five targets' include order about
+// wincrypt.
+extern "C" int OPENSSL_init_ssl(uint64_t opts, const void *settings);
 
 namespace po = boost::program_options;
 namespace bf = boost::filesystem;
@@ -92,11 +106,7 @@ void library_startup_once() {
     // shim calls bf::absolute() below, so it has to come first.
     tools::sanitize_locale();
     epee::string_tools::set_module_name_and_folder("monerod");
-#if OPENSSL_VERSION_NUMBER < 0x10100000 || defined(LIBRESSL_VERSION_TEXT)
-    SSL_library_init();
-#else
-    OPENSSL_init_ssl(0, NULL);
-#endif
+    OPENSSL_init_ssl(0, nullptr);
   });
 }
 

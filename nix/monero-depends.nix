@@ -139,6 +139,14 @@ buildPkgs.stdenv.mkDerivation {
     # mingw32_native_packages is different and still works: nothing overrides
     # `native_packages`, so its `+=` still runs and appends our empty value.
     #
+    # NO -j, deliberately. depends passes MAKEFLAGS down to each package's own make, and
+    # OpenSSL's build then invokes `ar` concurrently on one archive. The result was a
+    # genuinely corrupt libcrypto.a: `ar t` listed zero members and `nm` stopped with
+    # "malformed archive" right after libcrypto-lib-ct_log.obj, which the consumer only
+    # discovered at its final link ("error adding symbols: malformed archive").
+    # Serialising the dependency build costs wall-clock once and is cached thereafter;
+    # a corrupt archive costs a full debugging cycle every time.
+    #
     # GITIAN=1 drops native_ccache, which is useless in a nix build.
     #
     # mingw32_CFLAGS carries -std=gnu17 because depends pins packages from 2017-2019
@@ -170,8 +178,7 @@ buildPkgs.stdenv.mkDerivation {
       mingw32_CFLAGS="-pipe -std=gnu17" \
       mingw32_CXXFLAGS="-pipe" \
       mingw32_CPPFLAGS="-D_WIN32_WINNT=0x0A00" \
-      mingw32_native_packages="" \
-      -j"''${NIX_BUILD_CORES:-4}"
+      mingw32_native_packages=""
     runHook postBuild
   '';
 

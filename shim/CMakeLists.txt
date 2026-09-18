@@ -125,6 +125,22 @@ if(APPLE)
   set_target_properties(monerod_c PROPERTIES
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.exp")
 elseif(MINGW)
+  # Monero appends -DWIN32_LEAN_AND_MEAN to CMAKE_CXX_FLAGS (CMakeLists.txt:788,903),
+  # but that happens inside its own add_subdirectory scope, so OUR TUs never see it --
+  # and they reach boost::asio too, via daemon/rpc.h -> rpc/core_rpc_server.h for the
+  # daemon and wallet2_api.h -> wallet2 -> epee for the wallet. Without it, windows.h
+  # drags in winsock.h first and asio stops with
+  #   socket_types.hpp:24: #error WinSock.h has already been included
+  # which is an include-ORDER complaint, not a broken boost.
+  target_compile_definitions(monerod_c PRIVATE WIN32_LEAN_AND_MEAN)
+
+  # monero_c's patch 0018 reduces mingw's ICU_LIBRARIES to a bare `iconv`, so the final
+  # link asks for -liconv and needs somewhere to find depends' libiconv.a. The
+  # toolchain's CMAKE_FIND_ROOT_PATH governs find_*(), not the link line.
+  if(LOGOS_DEPENDS_LIB)
+    target_link_directories(monerod_c PRIVATE "${LOGOS_DEPENDS_LIB}")
+  endif()
+
   # PE has no version script -- a DLL's export table comes from __declspec(dllexport),
   # which monerod_c.h applies through MONEROD_API under MONEROD_C_BUILDING. Passing
   # --version-script here would be an ELF mechanism aimed at a PE link. Marking any

@@ -91,6 +91,7 @@ stdenv'.mkDerivation {
     # the others.
     "-DSODIUM_LIBRARY=${depends}/lib/libsodium.a"
     "-DSODIUM_INCLUDE_PATH=${depends}/include"
+    "-DLOGOS_DEPENDS_LIB=${depends}/lib"
   ] ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin "-DBoost_USE_MULTITHREADED=OFF";
 
   ninjaFlags = [ "monero_wallet2_api_c" ];
