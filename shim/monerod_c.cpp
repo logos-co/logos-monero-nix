@@ -10,6 +10,11 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#endif
+
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
@@ -55,6 +60,32 @@ std::unique_ptr<daemonize::t_daemon> g_daemon;   // guarded by g_mutex
 
 // easylogging++ is process-global: configure it once.
 bool g_log_configured = false;
+bool g_rx_jit_disabled = false;
+
+#if defined(__APPLE__)
+// A hardened-runtime host may JIT only with the allow-jit entitlement. Without it RandomX's
+// JIT traps in pthread_jit_write_protect_np the moment it builds a cache (Basecamp's host).
+bool host_forbids_jit() {
+  SecCodeRef self = nullptr;
+  if (SecCodeCopySelf(kSecCSDefaultFlags, &self) != errSecSuccess || !self) return false;
+  bool forbidden = false;
+  CFDictionaryRef info = nullptr;
+  if (SecCodeCopySigningInformation(reinterpret_cast<SecStaticCodeRef>(self),
+                                    kSecCSSigningInformation | kSecCSRequirementInformation,
+                                    &info) == errSecSuccess && info) {
+    uint32_t flags = 0;
+    if (auto n = static_cast<CFNumberRef>(CFDictionaryGetValue(info, kSecCodeInfoFlags)))
+      CFNumberGetValue(n, kCFNumberSInt32Type, &flags);
+    if (flags & kSecCodeSignatureRuntime) {
+      auto ents = static_cast<CFDictionaryRef>(CFDictionaryGetValue(info, kSecCodeInfoEntitlementsDict));
+      forbidden = !ents || CFDictionaryGetValue(ents, CFSTR("com.apple.security.cs.allow-jit")) != kCFBooleanTrue;
+    }
+    CFRelease(info);
+  }
+  CFRelease(self);
+  return forbidden;
+}
+#endif
 
 // tools::on_startup() minus setup_crash_dump(), whose SIGSEGV handler would kill the
 // host. The OpenSSL init matters: rpc-ssl=autodetect stalls every request without it.
@@ -65,6 +96,13 @@ void library_startup_once() {
     tools::sanitize_locale();
     epee::string_tools::set_module_name_and_folder("monerod");
     OPENSSL_init_ssl(0, nullptr);
+#if defined(__APPLE__)
+    // Monero's own knob: a mask of RandomX flags to drop. The interpreter gives the same hashes.
+    if (!std::getenv("MONERO_RANDOMX_UMASK") && host_forbids_jit()) {
+      setenv("MONERO_RANDOMX_UMASK", "8", 0);  // RANDOMX_FLAG_JIT
+      g_rx_jit_disabled = true;
+    }
+#endif
   });
 }
 
@@ -234,6 +272,8 @@ int MONEROD_start(const char* argv_json) {
 
     MGINFO("Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL
                       << ") in-process on " << g_network);
+    if (g_rx_jit_disabled)
+      MGINFO("RandomX JIT off: the host is hardened without com.apple.security.cs.allow-jit");
 
     // public_rpc_port = 0: never advertise as a public node.
     g_daemon = std::make_unique<daemonize::t_daemon>(vm, 0);
