@@ -82,6 +82,8 @@ target_link_libraries(monerod_c PRIVATE
 # here vs default in Monero's archives made dynamic_cast throw std::bad_cast.
 
 if(APPLE)
+  # Security/CoreFoundation: to read our host's code-signing flags (see host_forbids_jit).
+  target_link_libraries(monerod_c PRIVATE "-framework Security" "-framework CoreFoundation")
   target_link_options(monerod_c PRIVATE
     "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/monerod_c.exp")
   set_target_properties(monerod_c PROPERTIES
