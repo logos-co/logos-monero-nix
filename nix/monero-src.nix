@@ -9,31 +9,26 @@ let
   fetch = { owner, repo, rev, hash }:
     pkgs.fetchFromGitHub { inherit owner repo rev hash; };
 
-  moneroRev = "dbcc7d212c094bd1a45f7291dbb99a4b4627a96d";
+  moneroRev = "22578c3f7d7b4b6dd85ff7daa42a827d97cc53d0";
 
   monero_c = fetch {
-    owner = "MrCyjaneK"; repo = "monero_c"; rev = "v0.18.4.6-RC2";
-    hash = "sha256-xs+2i6v+eePG9URGtcOlzzXZopkpkXwlabjUAPMp5mA=";
+    owner = "MrCyjaneK"; repo = "monero_c"; rev = "v0.18.5.3-RC1";
+    hash = "sha256-ZT8nJTQV9q3/q0LCkiIOYYo4TJI1wDNq6YjNpgwS3XM=";
   };
 
   src = fetch {
     owner = "monero-project"; repo = "monero"; rev = moneroRev;
-    hash = "sha256-A7EqamADbTyK6l26foSXfZLH94OUUMsgi7jdsKRubXU=";
+    hash = "sha256-icv5z4DgyCDRKKC5qAv/YKSr2TYkDbL7HD8n4kEPzVo=";
   };
 
   # GitHub strips .gitmodules from tarballs, and patch 0001 edits it.
   gitmodules = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/monero-project/monero/${moneroRev}/.gitmodules";
-    hash = "sha256-dls/88qNfuE5kJZvBbcvDG/RB/Lo+U6dL4yGOd/NNh4=";
+    hash = "sha256-CfZK3qVpgu/FDRenQ3CNp5TgHixqx3WpXUTr/o9CTik=";
   };
 
   # Submodule content by path; tarballs omit it. The patches' gitlink SHAs are inert.
   submodules = {
-    "external/miniupnp" = fetch {
-      owner = "miniupnp"; repo = "miniupnp";
-      rev = "544e6fcc73c5ad9af48a8985c94f0f1d742ef2e0";
-      hash = "sha256-opd0hcZV+pjC3Mae3Yf6AR5fj6xVwGm9LuU5zEPxBKc=";
-    };
     "external/rapidjson" = fetch {
       owner = "Tencent"; repo = "rapidjson";
       rev = "129d19ba7f496df5e33658527a7158c79b99c21c";
@@ -50,12 +45,12 @@ let
       hash = "sha256-26UmESotSWnQ21VbAYEappLpkEMyl0jiuCaezRYd/sE=";
     };
 
-    # Upstream RandomX, not monero_c's iOS fork: the fork mangles i-cache flush ranges in
-    # the PoW verifier, and patch 0001 exists only to repoint this.
+    # Upstream RandomX v1.2.3 (Monero's pin), not monero_c's iOS fork: the fork mangles
+    # i-cache flush ranges in the PoW verifier, and patch 0001 exists only to repoint this.
     "external/randomx" = fetch {
       owner = "tevador"; repo = "RandomX";
-      rev = "102f8acf90a7649ada410de5499a7ec62e49e1da";
-      hash = "sha256-dfImzwbEfJQcaPZCoWypHiI6dishVRdqS/r+n3tfjvM=";
+      rev = "12f2c2ffe2108d6cf54c391fee33c8bc3646cdab";
+      hash = "sha256-H5tsmvCeMYMpLd+XHe5365QRMaXaUF7GkXk21ZH2W1E=";
     };
 
     # Added to the tree BY the patch series, so absent from monero's own .gitmodules.
@@ -78,10 +73,9 @@ let
 
   # Seeded so patch 0001's gitlink hunk has a base; tarballs carry no gitlinks.
   baseGitlinks = {
-    "external/miniupnp" = "544e6fcc73c5ad9af48a8985c94f0f1d742ef2e0";
     "external/rapidjson" = "129d19ba7f496df5e33658527a7158c79b99c21c";
     "external/trezor-common" = "bff7fdfe436c727982cc553bdfb29a9021b423b0";
-    "external/randomx" = "102f8acf90a7649ada410de5499a7ec62e49e1da";
+    "external/randomx" = "12f2c2ffe2108d6cf54c391fee33c8bc3646cdab";
     "external/supercop" = "633500ad8c8759995049ccd022107d1fa8a1bbc9";
   };
 
@@ -98,7 +92,7 @@ let
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "monero-src-patched";
-  version = "0.18.4.6-RC2";
+  version = "0.18.5.3-RC1";
   inherit src;
 
   # buildPackages: git runs on the builder. Resolving it from the target set would try
@@ -180,6 +174,18 @@ pkgs.stdenvNoCC.mkDerivation {
     cp -R ${monero_c}/monero_libwallet2_api_c "$out/.logos/wallet2_shim"
     # monero_c's shim includes the tree by relative path; recreate its layout.
     ln -s .. "$out/.logos/monero"
+    # Fingerprints as monero_c's generate_checksum.sh computes them: v0.18.5.3-RC1 tagged
+    # them stale (old wrapper sha + Monero commit), which upstream fixed after the tag.
+    _cs="$out/.logos/wallet2_shim/src/main/cpp"
+    _sum() { sha256sum "$1" | cut -d' ' -f1; }
+    chmod u+w "$_cs/monero_checksum.c"
+    {
+      echo '#include "monero_checksum.h"'
+      echo
+      echo "const char * MONERO_wallet2_api_c_h_sha256 = \"$(_sum "$_cs/monero_wallet2_api_c.h")\";"
+      echo "const char * MONERO_wallet2_api_c_cpp_sha256 = \"$(_sum "$_cs/monero_wallet2_api_c.cpp")-${moneroRev}\";"
+      echo "const char * MONERO_wallet2_api_c_exp_sha256 = \"$(_sum "$out/.logos/wallet2_shim/monero_libwallet2_api_c.exp")\";"
+    } > "$_cs/monero_checksum.c"
     # LGPL-3.0 notice for every library built from this tree.
     install -m0644 ${monero_c}/LICENSE "$out/.logos/LICENSE.monero_c"
     runHook postInstall
