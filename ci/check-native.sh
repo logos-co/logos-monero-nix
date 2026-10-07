@@ -24,16 +24,16 @@ d.MONEROD_version.restype = ctypes.c_char_p
 assert d.MONEROD_state() == 0, "a fresh daemon library must report STOPPED"
 print("libmonerod_c loads:", d.MONEROD_version().decode())
 w = ctypes.CDLL(sys.argv[2])
-# monero_c's own fingerprints of its header, wrapper (+ Monero commit) and export list, as
-# shipped in the v0.18.4.6-RC2 prebuilt this library replaces.
+# monero_c's own fingerprints of its header, wrapper (+ Monero commit) and export list for
+# v0.18.5.3-RC1, as its generate_checksum.sh computes them (the tag's own copy is stale).
 want = {
     "h":   "f1f24af3a9ae7e136c67fbbeffb1af0f7a3dd6cb70a7c43d5bd36a60fdb4a64f",
-    "cpp": "b62ff8b4a7178be15f7c53f8b368164357eb2f35db5bc00125beaafc39c3c4a5-dbcc7d212c094bd1a45f7291dbb99a4b4627a96d",
+    "cpp": "087f2bb11cdbca5f886346850c74f0404a9c371fd1706521e7590dcea21d8af5-22578c3f7d7b4b6dd85ff7daa42a827d97cc53d0",
     "exp": "0b4c4b51dd956cbc035dababe423b787add156e8f7d0174445d9e2d4cdbac01e",
 }
 for k, v in want.items():
     f = getattr(w, "MONERO_checksum_wallet2_api_c_" + k); f.restype = ctypes.c_char_p
     got = f().decode()
     assert got == v, f"wallet2 {k} checksum {got} != {v}"
-print("wallet2 loads; monero_c checksums match the v0.18.4.6-RC2 prebuilt")
+print("wallet2 loads; monero_c checksums match v0.18.5.3-RC1")
 PY

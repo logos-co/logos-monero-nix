@@ -3,7 +3,7 @@
 One source-built Monero tree, two C-ABI shared libraries.
 
 ```
-packages.<target>.monero-src   # monero @ dbcc7d21 + monero_c's 21 patches + ours
+packages.<target>.monero-src   # monero v0.18.5.3 + monero_c v0.18.5.3-RC1's 21 patches + ours
 packages.<target>.monerod-c    # libmonerod_c — the daemon (monerod) as a library
 ```
 
@@ -32,7 +32,7 @@ with `MONEROD_free`.
 code identical to vanilla Monero. `nix/monero-src.nix` asserts that at build time
 rather than trusting this paragraph, and holds our own patches to a named allowlist.
 
-`external/randomx` is pinned to **tevador's upstream 1.2.1**, Monero's own pin, not to
+`external/randomx` is pinned to **tevador's upstream 1.2.3**, Monero's own pin, not to
 `monero_c`'s iOS fork — see the comment in `nix/monero-src.nix`.
 
 ## Verified

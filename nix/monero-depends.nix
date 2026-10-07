@@ -24,10 +24,10 @@ let
       url = "https://archives.boost.io/release/1.69.0/source/boost_1_69_0.tar.gz";
       sha256 = "9a2c2819310839ea373f42d69e733c339b4e9a19deab6bfec448281554aa4dbb";
     };
-    "openssl-3.0.19.tar.gz" = fetch {
-      name = "openssl-3.0.19.tar.gz";
-      url = "https://www.openssl.org/source/openssl-3.0.19.tar.gz";
-      sha256 = "fa5a4143b8aae18be53ef2f3caf29a2e0747430b8bc74d32d88335b94ab63072";
+    "openssl-3.0.22.tar.gz" = fetch {
+      name = "openssl-3.0.22.tar.gz";
+      url = "https://github.com/openssl/openssl/releases/download/openssl-3.0.22/openssl-3.0.22.tar.gz";
+      sha256 = "67ebca7e50d17383028045486653492195b83db95f8558709701bb47b5c1ef81";
     };
     "zeromq-4.3.4.tar.gz" = fetch {
       name = "zeromq-4.3.4.tar.gz";
@@ -44,10 +44,10 @@ let
       url = "https://github.com/libexpat/libexpat/releases/download/R_2_6_0/expat-2.6.0.tar.bz2";
       sha256 = "ff60e6a6b6ce570ae012dc7b73169c7fdf4b6bf08c12ed0ec6f55736b78d85ba";
     };
-    "unbound-1.19.1.tar.gz" = fetch {
-      name = "unbound-1.19.1.tar.gz";
-      url = "https://www.nlnetlabs.nl/downloads/unbound/unbound-1.19.1.tar.gz";
-      sha256 = "bc1d576f3dd846a0739adc41ffaa702404c6767d2b6082deb9f2f97cbb24a3a9";
+    "unbound-1.26.1.tar.gz" = fetch {
+      name = "unbound-1.26.1.tar.gz";
+      url = "https://www.nlnetlabs.nl/downloads/unbound/unbound-1.26.1.tar.gz";
+      sha256 = "35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503";
     };
     "libsodium-1.0.18.tar.gz" = fetch {
       name = "libsodium-1.0.18.tar.gz";

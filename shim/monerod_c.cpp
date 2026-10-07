@@ -224,6 +224,9 @@ int MONEROD_start(const char* argv_json) {
     command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_bind_ip);
     command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_bind_port);
     command_line::add_arg(core_settings, daemon_args::arg_zmq_pub);
+    // t_daemon reads these even under --no-zmq; unregistered, its ctor throws bad_any_cast.
+    command_line::add_arg(core_settings, daemon_args::arg_confirm_zmq_rpc_external_bind);
+    command_line::add_arg(core_settings, daemon_args::arg_restricted_zmq_rpc);
     command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_disabled);
     daemonize::t_executor::init_options(core_settings);
 
