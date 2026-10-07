@@ -37,3 +37,37 @@ for k, v in want.items():
     assert got == v, f"wallet2 {k} checksum {got} != {v}"
 print("wallet2 loads; monero_c checksums match v0.18.5.3-RC1")
 PY
+
+# A load check is not a start check: v0.18.5.0's daemon reads options the shim had not
+# registered, so every start failed while everything above passed.
+python3 - "$dl" <<'PY'
+import ctypes, json, shutil, socket, sys, tempfile, time, urllib.request
+d = ctypes.CDLL(sys.argv[1])
+d.MONEROD_start.argtypes = [ctypes.c_char_p]
+d.MONEROD_last_error.restype = ctypes.c_void_p
+d.MONEROD_free.argtypes = [ctypes.c_void_p]
+def last_error():
+    p = d.MONEROD_last_error(); s = ctypes.cast(p, ctypes.c_char_p).value.decode(); d.MONEROD_free(p); return s
+def port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); n = s.getsockname()[1]; s.close(); return n
+dd, rpc = tempfile.mkdtemp(), port()
+# The argv logos-monerod-module builds, offline.
+argv = ["--stagenet", f"--data-dir={dd}", f"--log-file={dd}/monerod.log", "--rpc-bind-ip=127.0.0.1",
+        f"--rpc-bind-port={rpc}", f"--p2p-bind-port={port()}", "--no-zmq", "--check-updates=disabled",
+        "--no-igd", "--offline"]
+assert d.MONEROD_start(json.dumps(argv).encode()) == 0, "start refused: " + last_error()
+req = urllib.request.Request(f"http://127.0.0.1:{rpc}/json_rpc", headers={"Content-Type": "application/json"},
+                             data=b'{"jsonrpc":"2.0","id":"0","method":"get_info"}')
+for _ in range(240):
+    assert d.MONEROD_state() != 4, "node failed: " + last_error()
+    try:
+        info = json.loads(urllib.request.urlopen(req, timeout=2).read())["result"]; break
+    except (OSError, ValueError):
+        time.sleep(0.25)
+else:
+    raise SystemExit("node never answered RPC")
+d.MONEROD_stop()
+assert d.MONEROD_state() == 0, "node did not stop"
+shutil.rmtree(dd, ignore_errors=True)
+print(f"libmonerod_c runs a node: v{info['version']} {info['nettype']}, RPC answered, stopped")
+PY
