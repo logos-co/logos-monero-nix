@@ -3,7 +3,7 @@
 One source-built Monero tree, two C-ABI shared libraries.
 
 ```
-packages.<target>.monero-src   # monero v0.18.5.3 + monero_c v0.18.5.3-RC1's 21 patches + ours
+packages.<target>.monero-src   # monero v0.18.5.4 + monero_c v0.18.5.3-RC1's 21 patches + ours
 packages.<target>.monerod-c    # libmonerod_c — the daemon (monerod) as a library
 ```
 

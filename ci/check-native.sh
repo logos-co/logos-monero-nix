@@ -28,7 +28,7 @@ w = ctypes.CDLL(sys.argv[2])
 # v0.18.5.3-RC1, as its generate_checksum.sh computes them (the tag's own copy is stale).
 want = {
     "h":   "f1f24af3a9ae7e136c67fbbeffb1af0f7a3dd6cb70a7c43d5bd36a60fdb4a64f",
-    "cpp": "087f2bb11cdbca5f886346850c74f0404a9c371fd1706521e7590dcea21d8af5-22578c3f7d7b4b6dd85ff7daa42a827d97cc53d0",
+    "cpp": "087f2bb11cdbca5f886346850c74f0404a9c371fd1706521e7590dcea21d8af5-85f036ba7019cd36f08e8a38a27c37ea7b522618",
     "exp": "0b4c4b51dd956cbc035dababe423b787add156e8f7d0174445d9e2d4cdbac01e",
 }
 for k, v in want.items():

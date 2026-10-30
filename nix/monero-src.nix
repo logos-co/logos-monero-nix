@@ -1,5 +1,5 @@
-# One Monero tree for both libraries: monero at monero_c's pin, monero_c's patches replayed,
-# submodules pinned below. The patch set is wallet-side, and the build asserts it.
+# One Monero tree for both libraries: monero v0.18.5.4, monero_c v0.18.5.3-RC1's patches replayed
+# (5.4 changes no file they touch), submodules pinned below. The build asserts the set is wallet-side.
 { pkgs }:
 
 let
@@ -9,7 +9,7 @@ let
   fetch = { owner, repo, rev, hash }:
     pkgs.fetchFromGitHub { inherit owner repo rev hash; };
 
-  moneroRev = "22578c3f7d7b4b6dd85ff7daa42a827d97cc53d0";
+  moneroRev = "85f036ba7019cd36f08e8a38a27c37ea7b522618";
 
   monero_c = fetch {
     owner = "MrCyjaneK"; repo = "monero_c"; rev = "v0.18.5.3-RC1";
@@ -18,7 +18,7 @@ let
 
   src = fetch {
     owner = "monero-project"; repo = "monero"; rev = moneroRev;
-    hash = "sha256-icv5z4DgyCDRKKC5qAv/YKSr2TYkDbL7HD8n4kEPzVo=";
+    hash = "sha256-tJs55DvYwrp0e4T84eilBccntRPcns1aLYK3wLIrX7A=";
   };
 
   # GitHub strips .gitmodules from tarballs, and patch 0001 edits it.
@@ -92,7 +92,7 @@ let
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "monero-src-patched";
-  version = "0.18.5.3-RC1";
+  version = "0.18.5.4";
   inherit src;
 
   # buildPackages: git runs on the builder. Resolving it from the target set would try
